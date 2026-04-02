@@ -29,4 +29,4 @@ Rust 2024 edition を前提に、整形は標準の `rustfmt` に従うこと。
 履歴はまだ少ないから、コミットメッセージは `Add Gyazo upload client` みたいな命令形で、短く明確に書くこと。件名は 72 文字前後までに収めて、1コミットごとにレビューしやすい単位へ分けてね。プルリクエストには変更概要、実行した確認コマンド（`cargo build`、`cargo test`、`cargo clippy` など）、設定やプロトコルに関する前提があればそれも書いておくこと。MCP の挙動を変える場合は、リクエストやレスポンスの例も添えると分かりやすいわ。
 
 ## 設定とセキュリティ
-`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないこと。.env 系ファイルはローカル専用として扱って、必要なら `.env.example` だけを共有してね。既定値は `~/.config/gyazo-mcp-server/.env`、プロジェクト固有の上書きはカレントディレクトリから親方向へ探索される `.env` で扱う前提にすると分かりやすいわ。設定例が必要なら、実値ではなくプレースホルダーを使って、必要なキーは PR か README に書いて共有すること。
+`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないこと。.env 系ファイルはローカル専用として扱って、必要なら `.env.example` だけを共有してね。`client_id`、`client_secret`、`PAT` のような秘密情報は `~/.config/gyazo-mcp-server/.env` に置いて、`GYAZO_MCP_TCP_PORT` や `GYAZO_MCP_OAUTH_CALLBACK_PATH` のような起動設定は MCP クライアント側の `mcp_servers.Gyazo.env` で渡す前提にすると分かりやすいわ。設定例が必要なら、実値ではなくプレースホルダーを使って、必要なキーは PR か README に書いて共有すること。
