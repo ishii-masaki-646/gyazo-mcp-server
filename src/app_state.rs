@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
@@ -6,6 +6,12 @@ use uuid::Uuid;
 use crate::{
     auth::{
         config::AuthConfig,
+        mcp_session_store::{
+            decode_signing_key, encode_signing_key, generate_signing_key, load_mcp_session_state,
+            records_to_sessions, save_mcp_session_state, sessions_to_records, sign_access_token,
+            verify_access_token,
+        },
+        paths,
         state::AuthState,
         token_store::{StoredToken, save_token},
     },
@@ -17,6 +23,8 @@ pub(crate) struct AppState {
     auth_config: AuthConfig,
     auth_state: Mutex<AuthState>,
     oauth_session: Mutex<OAuthSessionState>,
+    mcp_session_file_path: Option<PathBuf>,
+    mcp_signing_key: Vec<u8>,
     runtime_config: RuntimeConfig,
 }
 
@@ -54,7 +62,7 @@ pub(crate) struct AuthorizationCodeGrant {
     pub(crate) backend_access_token: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccessTokenRecord {
     pub(crate) backend_access_token: String,
     pub(crate) gyazo_user: GyazoUserProfile,
@@ -67,10 +75,19 @@ pub(crate) struct AuthorizedSession {
 
 impl AppState {
     pub(crate) fn new(runtime_config: RuntimeConfig) -> Result<Self> {
+        let mcp_session_file_path = paths::mcp_session_file_path();
+        let (mcp_signing_key, access_tokens) =
+            load_or_initialize_mcp_sessions(mcp_session_file_path.as_deref())?;
+
         Ok(Self {
             auth_config: AuthConfig::from_env(),
             auth_state: Mutex::new(AuthState::load()?),
-            oauth_session: Mutex::new(OAuthSessionState::default()),
+            oauth_session: Mutex::new(OAuthSessionState {
+                access_tokens,
+                ..Default::default()
+            }),
+            mcp_session_file_path,
+            mcp_signing_key,
             runtime_config,
         })
     }
@@ -221,21 +238,26 @@ impl AppState {
     }
 
     pub(crate) fn issue_access_token(&self, record: AccessTokenRecord) -> Result<String> {
-        let token = Uuid::new_v4().to_string();
+        let session_id = Uuid::new_v4().to_string();
         let mut guard = self
             .oauth_session
             .lock()
             .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
-        guard.access_tokens.insert(token.clone(), record);
-        Ok(token)
+        guard.access_tokens.insert(session_id.clone(), record);
+        self.persist_mcp_sessions(&guard)?;
+
+        sign_access_token(&self.mcp_signing_key, &session_id)
     }
 
     pub(crate) fn validate_access_token(&self, token: &str) -> Result<Option<AccessTokenRecord>> {
+        let Some(session_id) = verify_access_token(&self.mcp_signing_key, token)? else {
+            return Ok(None);
+        };
         let guard = self
             .oauth_session
             .lock()
             .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
-        Ok(guard.access_tokens.get(token).cloned())
+        Ok(guard.access_tokens.get(&session_id).cloned())
     }
 
     pub(crate) fn authorized_session(&self, token: &str) -> Result<Option<AuthorizedSession>> {
@@ -243,4 +265,44 @@ impl AppState {
             .validate_access_token(token)?
             .map(|record| AuthorizedSession { record }))
     }
+
+    fn persist_mcp_sessions(&self, guard: &OAuthSessionState) -> Result<()> {
+        let Some(path) = self.mcp_session_file_path.as_deref() else {
+            return Ok(());
+        };
+
+        save_mcp_session_state(
+            path,
+            &crate::auth::mcp_session_store::StoredMcpSessionState {
+                signing_key: encode_signing_key(&self.mcp_signing_key),
+                sessions: records_to_sessions(&guard.access_tokens),
+            },
+        )
+    }
+}
+
+fn load_or_initialize_mcp_sessions(
+    path: Option<&std::path::Path>,
+) -> Result<(Vec<u8>, HashMap<String, AccessTokenRecord>)> {
+    let Some(path) = path else {
+        return Ok((generate_signing_key(), HashMap::new()));
+    };
+
+    if let Some(stored_state) = load_mcp_session_state(path)? {
+        return Ok((
+            decode_signing_key(&stored_state.signing_key)?,
+            sessions_to_records(stored_state.sessions),
+        ));
+    }
+
+    let signing_key = generate_signing_key();
+    save_mcp_session_state(
+        path,
+        &crate::auth::mcp_session_store::StoredMcpSessionState {
+            signing_key: encode_signing_key(&signing_key),
+            sessions: Vec::new(),
+        },
+    )?;
+
+    Ok((signing_key, HashMap::new()))
 }

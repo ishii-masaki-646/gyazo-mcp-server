@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use axum::http::request::Parts;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
@@ -13,11 +14,12 @@ use rmcp::{
 };
 
 use crate::{
-    app_state::AppState,
+    app_state::{AppState, AuthorizedSession},
     gyazo_api::{
         create_image_resource_uri, extract_image_id_from_resource_uri,
         fetch_image_as_base64, format_image_metadata_markdown, get_image, list_images,
     },
+    mcp_oauth::authorized_session_from_parts,
 };
 
 #[derive(Clone)]
@@ -71,10 +73,10 @@ impl ServerHandler for GyazoServer {
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParam>,
-        _context: RequestContext<rmcp::service::RoleServer>,
+        context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<ListResourcesResult, rmcp::ErrorData> {
-        let backend_access_token = backend_access_token(&self.app_state)?;
-        let listed = list_images(&backend_access_token, Some(1), Some(20))
+        let session = authorized_session_from_context(&self.app_state, &context)?;
+        let listed = list_images(&session.record.backend_access_token, Some(1), Some(20))
             .await
             .map_err(internal_error)?;
 
@@ -103,11 +105,11 @@ impl ServerHandler for GyazoServer {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParam,
-        _context: RequestContext<rmcp::service::RoleServer>,
+        context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<ReadResourceResult, rmcp::ErrorData> {
-        let backend_access_token = backend_access_token(&self.app_state)?;
+        let session = authorized_session_from_context(&self.app_state, &context)?;
         let image_id = extract_image_id_from_resource_uri(&request.uri).map_err(internal_error)?;
-        let image = get_image(&backend_access_token, &image_id)
+        let image = get_image(&session.record.backend_access_token, &image_id)
             .await
             .map_err(internal_error)?;
         let image_url = image
@@ -139,12 +141,18 @@ impl ServerHandler for GyazoServer {
     }
 }
 
-fn backend_access_token(app_state: &AppState) -> Result<String, rmcp::ErrorData> {
-    app_state
-        .resolve_backend_access_token()
+fn authorized_session_from_context(
+    app_state: &AppState,
+    context: &RequestContext<rmcp::service::RoleServer>,
+) -> Result<AuthorizedSession, rmcp::ErrorData> {
+    let parts = context.extensions.get::<Parts>().ok_or_else(|| {
+        rmcp::ErrorData::invalid_params("missing request parts in request context", None)
+    })?;
+
+    authorized_session_from_parts(app_state, parts)
         .map_err(internal_error)?
         .ok_or_else(|| {
-            rmcp::ErrorData::invalid_params("missing backend access token", None)
+            rmcp::ErrorData::invalid_params("missing authorized session in request context", None)
         })
 }
 

@@ -11,7 +11,7 @@ const UPLOAD_IMAGE_URL: &str = "https://upload.gyazo.com/api/upload";
 const OEMBED_URL: &str = "https://api.gyazo.com/api/oembed";
 const RESOURCE_URI_PREFIX: &str = "gyazo-mcp:///";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GyazoUserProfile {
     pub(crate) email: String,
     pub(crate) name: String,

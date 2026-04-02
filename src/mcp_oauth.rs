@@ -8,6 +8,7 @@ use axum::{
     http::{
         HeaderValue, Request, StatusCode,
         header::{AUTHORIZATION, WWW_AUTHENTICATE},
+        request::Parts,
     },
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
@@ -193,13 +194,10 @@ pub(crate) async fn maybe_complete_mcp_authorization(
         .await
         .map_err(|error| OAuthCallbackFailure::bad_gateway(error.to_string()))?;
 
-    app_state
-        .save_oauth_token(token)
-        .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?;
-
     let redirect_uri = pending.redirect_uri.clone();
     let client_state = pending.state.clone();
-    let authorization_code = issue_authorization_code(app_state, pending)
+    let authorization_code =
+        issue_authorization_code(app_state, pending, token.access_token)
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?;
     let redirect_uri =
         build_client_redirect_url(&redirect_uri, &authorization_code, client_state.as_deref());
@@ -214,7 +212,10 @@ fn start_authorization(
     let pending = validate_authorization_request(app_state, query)?;
 
     if app_state.has_backend_api_credential()? {
-        let code = issue_authorization_code(app_state, pending.clone())?;
+        let backend_access_token = app_state
+            .resolve_backend_access_token()?
+            .ok_or_else(|| anyhow!("Gyazo backend access token が見つからないよ"))?;
+        let code = issue_authorization_code(app_state, pending.clone(), backend_access_token)?;
         let redirect = build_client_redirect_url(&pending.redirect_uri, &code, pending.state.as_deref());
         return Ok(AuthorizationStart::Redirect(redirect));
     }
@@ -283,10 +284,8 @@ fn validate_authorization_request(
 fn issue_authorization_code(
     app_state: &AppState,
     pending: PendingAuthorizationRequest,
+    backend_access_token: String,
 ) -> Result<String> {
-    let backend_access_token = app_state
-        .resolve_backend_access_token()?
-        .ok_or_else(|| anyhow!("Gyazo backend access token が見つからないよ"))?;
     let grant = AuthorizationCodeGrant {
         client_id: pending.client_id,
         redirect_uri: pending.redirect_uri,
@@ -398,15 +397,26 @@ pub(crate) fn authorized_session_from_request(
     app_state: &AppState,
     request: &Request<Body>,
 ) -> Result<Option<AuthorizedSession>> {
-    let Some(token) = extract_bearer_token(request) else {
+    let Some(token) = extract_bearer_token(request.headers()) else {
         return Ok(None);
     };
 
     app_state.authorized_session(token)
 }
 
-fn extract_bearer_token(request: &Request<Body>) -> Option<&str> {
-    let value = request.headers().get(AUTHORIZATION)?.to_str().ok()?;
+pub(crate) fn authorized_session_from_parts(
+    app_state: &AppState,
+    parts: &Parts,
+) -> Result<Option<AuthorizedSession>> {
+    let Some(token) = extract_bearer_token(&parts.headers) else {
+        return Ok(None);
+    };
+
+    app_state.authorized_session(token)
+}
+
+fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
     value
         .strip_prefix("Bearer ")
         .map(str::trim)

@@ -12,3 +12,7 @@ pub(crate) fn env_file_path() -> Option<PathBuf> {
 pub(crate) fn token_file_path() -> Option<PathBuf> {
     Some(config_dir()?.join("token.toml"))
 }
+
+pub(crate) fn mcp_session_file_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("mcp_sessions.toml"))
+}
