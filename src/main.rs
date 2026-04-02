@@ -25,8 +25,9 @@ use tracing_subscriber::EnvFilter;
 use crate::app_state::AppState;
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::mcp_oauth::{
-    authorization_server_metadata_handler, authorize_placeholder_handler,
-    protected_resource_metadata_handler, require_mcp_bearer_token, token_placeholder_handler,
+    authorization_server_metadata_handler, authorize_handler,
+    maybe_complete_mcp_authorization, protected_resource_metadata_handler,
+    require_mcp_bearer_token, token_handler,
 };
 use crate::auth::paths;
 use crate::runtime_config::RuntimeConfig;
@@ -63,6 +64,15 @@ async fn oauth_callback_handler(
     State(app_state): State<Arc<AppState>>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> impl IntoResponse {
+    match maybe_complete_mcp_authorization(app_state.as_ref(), &query).await {
+        Ok(Some(response)) => return response,
+        Ok(None) => {}
+        Err(error) => {
+            let (status, message) = error.into_parts();
+            return (status, message).into_response();
+        }
+    }
+
     match oauth::complete_login(app_state.as_ref(), query).await {
         Ok(message) => (axum::http::StatusCode::OK, message).into_response(),
         Err(error) => {
@@ -116,9 +126,9 @@ async fn main() -> Result<()> {
         )
         .route(
             runtime_config.authorization_endpoint_path(),
-            get(authorize_placeholder_handler),
+            get(authorize_handler),
         )
-        .route(runtime_config.token_endpoint_path(), post(token_placeholder_handler))
+        .route(runtime_config.token_endpoint_path(), post(token_handler))
         .route("/", get(root_handler))
         .route(runtime_config.oauth_start_path(), get(oauth_start_handler))
         .route(

@@ -11,7 +11,7 @@ use crate::{
 const AUTHORIZE_URL: &str = "https://gyazo.com/oauth/authorize";
 const TOKEN_URL: &str = "https://gyazo.com/oauth/token";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct OAuthCallbackQuery {
     pub(crate) code: Option<String>,
     pub(crate) error: Option<String>,
@@ -53,19 +53,11 @@ impl OAuthCallbackFailure {
 }
 
 pub(crate) fn begin_login(app_state: &AppState) -> Result<String> {
-    let credentials = app_state
-        .auth_config()
-        .oauth_credentials()
-        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してね")?;
     let state = Uuid::new_v4().to_string();
 
-    app_state.set_pending_oauth_state(state.clone())?;
+    app_state.set_pending_direct_login_state(state.clone())?;
 
-    Ok(build_authorize_url(
-        &credentials.client_id,
-        &app_state.runtime_config().oauth_callback_url(),
-        &state,
-    ))
+    build_gyazo_authorize_url(app_state, &state)
 }
 
 pub(crate) async fn complete_login(
@@ -96,7 +88,7 @@ pub(crate) async fn complete_login(
     let returned_state = state
         .ok_or_else(|| OAuthCallbackFailure::bad_request("callback に state が含まれていないよ"))?;
     let pending_state = app_state
-        .take_pending_oauth_state()
+        .take_pending_direct_login_state()
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?
         .ok_or_else(|| {
             OAuthCallbackFailure::bad_request(
@@ -130,6 +122,19 @@ pub(crate) async fn complete_login(
     ))
 }
 
+pub(crate) fn build_gyazo_authorize_url(app_state: &AppState, state: &str) -> Result<String> {
+    let credentials = app_state
+        .auth_config()
+        .oauth_credentials()
+        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してね")?;
+
+    Ok(build_authorize_url(
+        &credentials.client_id,
+        &app_state.runtime_config().oauth_callback_url(),
+        state,
+    ))
+}
+
 fn build_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
     let query = [
         ("client_id", client_id),
@@ -145,7 +150,7 @@ fn build_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> Stri
     format!("{AUTHORIZE_URL}?{query}")
 }
 
-async fn exchange_code_for_token(app_state: &AppState, code: &str) -> Result<StoredToken> {
+pub(crate) async fn exchange_code_for_token(app_state: &AppState, code: &str) -> Result<StoredToken> {
     let credentials = app_state
         .auth_config()
         .oauth_credentials()

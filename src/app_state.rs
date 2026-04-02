@@ -1,6 +1,7 @@
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use anyhow::{Context, Result, anyhow};
+use uuid::Uuid;
 
 use crate::{
     auth::{
@@ -20,8 +21,33 @@ pub(crate) struct AppState {
 
 #[derive(Debug, Default)]
 struct OAuthSessionState {
-    pending_state: Option<String>,
+    pending_direct_login_state: Option<String>,
+    pending_authorizations: HashMap<String, PendingAuthorizationRequest>,
+    authorization_codes: HashMap<String, AuthorizationCodeGrant>,
+    access_tokens: HashMap<String, AccessTokenRecord>,
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct PendingAuthorizationRequest {
+    pub(crate) client_id: String,
+    pub(crate) redirect_uri: String,
+    pub(crate) state: Option<String>,
+    pub(crate) code_challenge: String,
+    pub(crate) resource: Option<String>,
+    pub(crate) requested_scope: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizationCodeGrant {
+    pub(crate) client_id: String,
+    pub(crate) redirect_uri: String,
+    pub(crate) code_challenge: String,
+    pub(crate) resource: Option<String>,
+    pub(crate) scope: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccessTokenRecord;
 
 impl AppState {
     pub(crate) fn new(runtime_config: RuntimeConfig) -> Result<Self> {
@@ -65,20 +91,103 @@ impl AppState {
         Ok(())
     }
 
-    pub(crate) fn set_pending_oauth_state(&self, state: String) -> Result<()> {
+    pub(crate) fn has_saved_oauth_token(&self) -> Result<bool> {
+        let guard = self
+            .auth_state
+            .lock()
+            .map_err(|_| anyhow!("auth state lock is poisoned"))?;
+        Ok(guard.has_saved_oauth_token())
+    }
+
+    pub(crate) fn has_backend_api_credential(&self) -> Result<bool> {
+        Ok(self.has_saved_oauth_token()? || self.auth_config.has_personal_access_token())
+    }
+
+    pub(crate) fn set_pending_direct_login_state(&self, state: String) -> Result<()> {
         let mut guard = self
             .oauth_session
             .lock()
             .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
-        guard.pending_state = Some(state);
+        guard.pending_direct_login_state = Some(state);
         Ok(())
     }
 
-    pub(crate) fn take_pending_oauth_state(&self) -> Result<Option<String>> {
+    pub(crate) fn take_pending_direct_login_state(&self) -> Result<Option<String>> {
         let mut guard = self
             .oauth_session
             .lock()
             .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
-        Ok(guard.pending_state.take())
+        Ok(guard.pending_direct_login_state.take())
+    }
+
+    pub(crate) fn insert_pending_authorization(
+        &self,
+        state: String,
+        request: PendingAuthorizationRequest,
+    ) -> Result<()> {
+        let mut guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        guard.pending_authorizations.insert(state, request);
+        Ok(())
+    }
+
+    pub(crate) fn take_pending_authorization(
+        &self,
+        state: &str,
+    ) -> Result<Option<PendingAuthorizationRequest>> {
+        let mut guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        Ok(guard.pending_authorizations.remove(state))
+    }
+
+    pub(crate) fn has_pending_authorization(&self, state: &str) -> Result<bool> {
+        let guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        Ok(guard.pending_authorizations.contains_key(state))
+    }
+
+    pub(crate) fn issue_authorization_code(&self, grant: AuthorizationCodeGrant) -> Result<String> {
+        let code = Uuid::new_v4().to_string();
+        let mut guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        guard.authorization_codes.insert(code.clone(), grant);
+        Ok(code)
+    }
+
+    pub(crate) fn take_authorization_code(
+        &self,
+        code: &str,
+    ) -> Result<Option<AuthorizationCodeGrant>> {
+        let mut guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        Ok(guard.authorization_codes.remove(code))
+    }
+
+    pub(crate) fn issue_access_token(&self, record: AccessTokenRecord) -> Result<String> {
+        let token = Uuid::new_v4().to_string();
+        let mut guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        guard.access_tokens.insert(token.clone(), record);
+        Ok(token)
+    }
+
+    pub(crate) fn validate_access_token(&self, token: &str) -> Result<Option<AccessTokenRecord>> {
+        let guard = self
+            .oauth_session
+            .lock()
+            .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+        Ok(guard.access_tokens.get(token).cloned())
     }
 }
