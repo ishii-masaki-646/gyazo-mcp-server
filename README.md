@@ -57,3 +57,7 @@ gyazo-mcp-server
 ```
 
 MCP endpoint は既定で `http://127.0.0.1:18449/mcp` です。
+
+## License
+
+このリポジトリは `MIT OR Apache-2.0` で提供します。詳細は [LICENSE-MIT](LICENSE-MIT) と [LICENSE-APACHE](LICENSE-APACHE) を参照してください。
