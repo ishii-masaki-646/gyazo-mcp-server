@@ -13,8 +13,8 @@ use serde_json::json;
 use crate::{
     app_state::AuthorizedSession,
     gyazo_api::{
-        GyazoUploadImageRequest, delete_image, fetch_image_as_base64, get_image,
-        get_latest_image, get_oembed, list_images, search_images, upload_image,
+        GyazoUploadImageRequest, delete_image, fetch_image_as_base64, get_image, get_latest_image,
+        get_oembed, list_images, search_images, upload_image,
     },
     server::GyazoServer,
 };
@@ -59,11 +59,8 @@ struct GyazoUploadImageArgs {
 
 #[rmcp::tool_router(router = gyazo_tool_router, vis = "pub(crate)")]
 impl GyazoServer {
-    #[rmcp::tool(description = "Show the current Gyazo user bound to this MCP access token")]
-    fn gyazo_whoami(
-        &self,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, McpError> {
+    #[rmcp::tool(description = "現在の MCP access token に紐づく Gyazo ユーザーを表示します")]
+    fn gyazo_whoami(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, McpError> {
         let session = authorized_session(&parts)?;
         let user = session.record.gyazo_user;
 
@@ -75,7 +72,7 @@ impl GyazoServer {
         }))
     }
 
-    #[rmcp::tool(description = "Full-text search for captures uploaded by the current Gyazo user")]
+    #[rmcp::tool(description = "現在の Gyazo ユーザーがアップロードしたキャプチャを全文検索します")]
     async fn gyazo_search(
         &self,
         Extension(parts): Extension<Parts>,
@@ -89,7 +86,7 @@ impl GyazoServer {
         json_result(images)
     }
 
-    #[rmcp::tool(description = "List the authenticated user's Gyazo images")]
+    #[rmcp::tool(description = "認証済みユーザーの Gyazo 画像一覧を取得します")]
     async fn gyazo_list_images(
         &self,
         Extension(parts): Extension<Parts>,
@@ -103,7 +100,7 @@ impl GyazoServer {
         json_result(images)
     }
 
-    #[rmcp::tool(description = "Get a single Gyazo image by image ID or Gyazo URL")]
+    #[rmcp::tool(description = "画像 ID または Gyazo URL を指定して 1 件の画像を取得します")]
     async fn gyazo_get_image(
         &self,
         Extension(parts): Extension<Parts>,
@@ -118,7 +115,7 @@ impl GyazoServer {
         json_result(image)
     }
 
-    #[rmcp::tool(description = "Delete a single Gyazo image by image ID or Gyazo URL")]
+    #[rmcp::tool(description = "画像 ID または Gyazo URL を指定して 1 件の画像を削除します")]
     async fn gyazo_delete_image(
         &self,
         Extension(parts): Extension<Parts>,
@@ -133,7 +130,7 @@ impl GyazoServer {
         json_result(deleted)
     }
 
-    #[rmcp::tool(description = "Get the latest Gyazo image with its image content and metadata")]
+    #[rmcp::tool(description = "最新の Gyazo 画像を画像本体とメタデータ付きで取得します")]
     async fn gyazo_get_latest_image(
         &self,
         Extension(parts): Extension<Parts>,
@@ -148,13 +145,11 @@ impl GyazoServer {
 
         Ok(CallToolResult::success(vec![
             Content::image(binary.data, binary.mime_type),
-            Content::text(
-                serde_json::to_string_pretty(&image).map_err(internal_error)?,
-            ),
+            Content::text(serde_json::to_string_pretty(&image).map_err(internal_error)?),
         ]))
     }
 
-    #[rmcp::tool(description = "Upload a base64 image to Gyazo")]
+    #[rmcp::tool(description = "base64 画像を Gyazo にアップロードします")]
     async fn gyazo_upload_image(
         &self,
         Extension(parts): Extension<Parts>,
@@ -181,7 +176,7 @@ impl GyazoServer {
         json_result(uploaded)
     }
 
-    #[rmcp::tool(description = "Get oEmbed metadata for a Gyazo image page URL")]
+    #[rmcp::tool(description = "Gyazo 画像ページ URL の oEmbed メタデータを取得します")]
     async fn gyazo_get_oembed_metadata(
         &self,
         Parameters(GyazoOEmbedArgs { image_url }): Parameters<GyazoOEmbedArgs>,
@@ -198,7 +193,10 @@ fn authorized_session(parts: &Parts) -> Result<AuthorizedSession, McpError> {
         .get::<AuthorizedSession>()
         .cloned()
         .ok_or_else(|| {
-            McpError::invalid_params("missing authorized session in request context", None)
+            McpError::invalid_params(
+                "request context に authorized session が含まれていません",
+                None,
+            )
         })
 }
 
@@ -207,11 +205,11 @@ fn select_image_ref(args: GyazoGetImageArgs) -> Result<String, McpError> {
         (Some(image_id), None) if !image_id.trim().is_empty() => Ok(image_id),
         (None, Some(image_url)) if !image_url.trim().is_empty() => Ok(image_url),
         (Some(_), Some(_)) => Err(McpError::invalid_params(
-            "image_id と image_url はどちらか片方だけ指定してね",
+            "image_id と image_url はどちらか一方のみ指定してください",
             None,
         )),
         _ => Err(McpError::invalid_params(
-            "image_id か image_url のどちらかを指定してね",
+            "image_id か image_url のいずれかを指定してください",
             None,
         )),
     }

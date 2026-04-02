@@ -31,25 +31,40 @@ pub(crate) fn load_mcp_session_state(path: &Path) -> Result<Option<StoredMcpSess
         return Ok(None);
     }
 
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read MCP session file: {}", path.display()))?;
-    let state = toml::from_str(&raw)
-        .with_context(|| format!("failed to parse MCP session file: {}", path.display()))?;
+    let raw = fs::read_to_string(path).with_context(|| {
+        format!(
+            "MCP session file を読み取れませんでした: {}",
+            path.display()
+        )
+    })?;
+    let state = toml::from_str(&raw).with_context(|| {
+        format!(
+            "MCP session file を解析できませんでした: {}",
+            path.display()
+        )
+    })?;
 
     Ok(Some(state))
 }
 
 pub(crate) fn save_mcp_session_state(path: &Path, state: &StoredMcpSessionState) -> Result<()> {
-    let raw = toml::to_string(state).context("failed to serialize MCP session file")?;
+    let raw = toml::to_string(state).context("MCP session file をシリアライズできませんでした")?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create MCP session directory: {}", parent.display())
+            format!(
+                "MCP session directory を作成できませんでした: {}",
+                parent.display()
+            )
         })?;
     }
 
-    fs::write(path, raw)
-        .with_context(|| format!("failed to write MCP session file: {}", path.display()))
+    fs::write(path, raw).with_context(|| {
+        format!(
+            "MCP session file に書き込めませんでした: {}",
+            path.display()
+        )
+    })
 }
 
 pub(crate) fn generate_signing_key() -> Vec<u8> {
@@ -66,7 +81,7 @@ pub(crate) fn encode_signing_key(signing_key: &[u8]) -> String {
 pub(crate) fn decode_signing_key(encoded: &str) -> Result<Vec<u8>> {
     URL_SAFE_NO_PAD
         .decode(encoded)
-        .context("failed to decode MCP signing key")
+        .context("MCP signing key をデコードできませんでした")
 }
 
 pub(crate) fn sign_access_token(signing_key: &[u8], session_id: &str) -> Result<String> {
@@ -131,7 +146,7 @@ pub(crate) fn records_to_sessions(
 
 fn token_signature(signing_key: &[u8], session_id: &str) -> Result<String> {
     let mut mac =
-        HmacSha256::new_from_slice(signing_key).context("failed to initialize HMAC signer")?;
+        HmacSha256::new_from_slice(signing_key).context("HMAC signer を初期化できませんでした")?;
     mac.update(TOKEN_PREFIX.as_bytes());
     mac.update(b":");
     mac.update(session_id.as_bytes());
@@ -162,9 +177,11 @@ mod tests {
         let verified = verify_access_token(&signing_key, &token).unwrap();
 
         assert_eq!(verified.as_deref(), Some("session-123"));
-        assert!(verify_access_token(&signing_key, "gmcp1.session-123.invalid")
-            .unwrap()
-            .is_none());
+        assert!(
+            verify_access_token(&signing_key, "gmcp1.session-123.invalid")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -198,7 +215,10 @@ mod tests {
         save_mcp_session_state(&path, &state).unwrap();
         let loaded = load_mcp_session_state(&path).unwrap().unwrap();
 
-        assert_eq!(decode_signing_key(&loaded.signing_key).unwrap(), signing_key);
+        assert_eq!(
+            decode_signing_key(&loaded.signing_key).unwrap(),
+            signing_key
+        );
         assert_eq!(sessions_to_records(loaded.sessions), records);
 
         let _ = fs::remove_file(&path);

@@ -81,7 +81,11 @@ impl RuntimeConfig {
     }
 
     pub(crate) fn protected_resource_metadata_url(&self) -> String {
-        format!("{}{}", self.base_url(), self.protected_resource_metadata_path())
+        format!(
+            "{}{}",
+            self.base_url(),
+            self.protected_resource_metadata_path()
+        )
     }
 
     pub(crate) fn authorization_server_issuer(&self) -> String {
@@ -89,7 +93,11 @@ impl RuntimeConfig {
     }
 
     pub(crate) fn authorization_server_metadata_url(&self) -> String {
-        format!("{}{}", self.base_url(), self.authorization_server_metadata_path())
+        format!(
+            "{}{}",
+            self.base_url(),
+            self.authorization_server_metadata_path()
+        )
     }
 
     pub(crate) fn authorization_endpoint_url(&self) -> String {

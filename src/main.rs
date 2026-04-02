@@ -25,12 +25,12 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app_state::AppState;
 use crate::auth::oauth::{self, OAuthCallbackQuery};
-use crate::mcp_oauth::{
-    authorization_server_metadata_handler, authorize_handler,
-    maybe_complete_mcp_authorization, protected_resource_metadata_handler,
-    register_client_handler, require_mcp_bearer_token, token_handler,
-};
 use crate::auth::paths;
+use crate::mcp_oauth::{
+    authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
+    protected_resource_metadata_handler, register_client_handler, require_mcp_bearer_token,
+    token_handler,
+};
 use crate::runtime_config::RuntimeConfig;
 use crate::server::GyazoServer;
 
@@ -55,7 +55,7 @@ async fn oauth_start_handler(State(app_state): State<Arc<AppState>>) -> impl Int
         Ok(authorize_url) => Redirect::temporary(&authorize_url).into_response(),
         Err(error) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Gyazo OAuth login を開始できなかったよ: {error}"),
+            format!("Gyazo OAuth login を開始できませんでした: {error}"),
         )
             .into_response(),
     }
@@ -84,7 +84,7 @@ async fn oauth_callback_handler(
 }
 
 async fn root_handler() -> &'static str {
-    "gyazo-mcp-server is running"
+    "gyazo-mcp-server は起動中です"
 }
 
 #[tokio::main]
@@ -108,9 +108,12 @@ async fn main() -> Result<()> {
             Arc::new(LocalSessionManager::default()),
             StreamableHttpServerConfig::default(),
         );
-    let mcp_routes = Router::new().nest_service(runtime_config.mcp_path(), service).route_layer(
-        middleware::from_fn_with_state(app_state.clone(), require_mcp_bearer_token),
-    );
+    let mcp_routes = Router::new()
+        .nest_service(runtime_config.mcp_path(), service)
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_mcp_bearer_token,
+        ));
 
     let app = Router::new()
         .route(
@@ -154,7 +157,7 @@ async fn main() -> Result<()> {
         registration_endpoint_url = %runtime_config.registration_endpoint_url(),
         oauth_start_url = %runtime_config.oauth_start_url(),
         oauth_callback_url = %runtime_config.oauth_callback_url(),
-        "starting gyazo mcp http server",
+        "Gyazo MCP HTTP サーバーを起動します",
     );
 
     axum::serve(listener, app)

@@ -14,22 +14,27 @@ pub(crate) fn load_token(path: &Path) -> Result<Option<StoredToken>> {
     }
 
     let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read token file: {}", path.display()))?;
+        .with_context(|| format!("token file を読み取れませんでした: {}", path.display()))?;
     let token = toml::from_str(&raw)
-        .with_context(|| format!("failed to parse token file: {}", path.display()))?;
+        .with_context(|| format!("token file を解析できませんでした: {}", path.display()))?;
 
     Ok(Some(token))
 }
 
 pub(crate) fn save_token(path: &Path, token: &StoredToken) -> Result<()> {
-    let raw = toml::to_string(token).context("failed to serialize token file")?;
+    let raw = toml::to_string(token).context("token file をシリアライズできませんでした")?;
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create token directory: {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "token directory を作成できませんでした: {}",
+                parent.display()
+            )
+        })?;
     }
 
-    fs::write(path, raw).with_context(|| format!("failed to write token file: {}", path.display()))
+    fs::write(path, raw)
+        .with_context(|| format!("token file に書き込めませんでした: {}", path.display()))
 }
 
 #[cfg(test)]

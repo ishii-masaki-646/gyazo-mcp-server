@@ -25,16 +25,16 @@
   - 主要パラメータ: `imageData`, `app`, `description`, `refererUrl`, `title`
 
 ### Resources
-- README には `gyazo-mcp://` URI の Resources もあると書かれている
+- README には `gyazo-mcp://` URI の Resources もあると記載されている
 - 含まれる情報の例:
   - 元画像
   - メタデータ (`title`, `description`, `app`, `url`)
   - OCR データ
 
 ## 実装メモ
-- 公式実装は `PAT` ベースで、MCP 標準の login broker までは持っていない
-- このリポジトリでは、公式の 4 tools をベースラインとして揃えるのが自然
-- 追加差別化ポイントは `MCP login` と `whoami` のような認証確認系ツールになりそう
+- 公式実装は `PAT` ベースで、MCP 標準の login broker までは備えていない
+- このリポジトリでは、公式の 4 tools をベースラインとしてそろえる方針が自然である
+- 追加の差別化要素としては、`MCP login` と `whoami` のような認証確認系ツールが考えられる
 
 ## Sources
 - https://github.com/nota/gyazo-mcp-server

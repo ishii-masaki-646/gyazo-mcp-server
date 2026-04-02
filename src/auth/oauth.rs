@@ -3,10 +3,7 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{
-    app_state::AppState,
-    auth::token_store::StoredToken,
-};
+use crate::{app_state::AppState, auth::token_store::StoredToken};
 
 const AUTHORIZE_URL: &str = "https://gyazo.com/oauth/authorize";
 const TOKEN_URL: &str = "https://gyazo.com/oauth/token";
@@ -79,26 +76,26 @@ pub(crate) async fn complete_login(
             format!(": {description}")
         };
         return Err(OAuthCallbackFailure::bad_request(format!(
-            "Gyazo OAuth がエラーを返したよ ({error}{suffix})"
+            "Gyazo OAuth がエラーを返しました ({error}{suffix})"
         )));
     }
 
     let code = code
-        .ok_or_else(|| OAuthCallbackFailure::bad_request("callback に code が含まれていないよ"))?;
+        .ok_or_else(|| OAuthCallbackFailure::bad_request("callback に code が含まれていません"))?;
     let returned_state = state
-        .ok_or_else(|| OAuthCallbackFailure::bad_request("callback に state が含まれていないよ"))?;
+        .ok_or_else(|| OAuthCallbackFailure::bad_request("callback に state が含まれていません"))?;
     let pending_state = app_state
         .take_pending_direct_login_state()
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?
         .ok_or_else(|| {
             OAuthCallbackFailure::bad_request(
-                "保留中の OAuth state が見つからないよ。/oauth/start からやり直してね",
+                "保留中の OAuth state が見つかりません。/oauth/start から再度実行してください。",
             )
         })?;
 
     if returned_state != pending_state {
         return Err(OAuthCallbackFailure::bad_request(
-            "OAuth state が一致しないよ。もう一度 login をやり直してね",
+            "OAuth state が一致しません。再度 login を実行してください。",
         ));
     }
 
@@ -115,10 +112,10 @@ pub(crate) async fn complete_login(
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?
         .token_file_path
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "(unavailable)".to_string());
+        .unwrap_or_else(|| "（利用不可）".to_string());
 
     Ok(format!(
-        "Gyazo OAuth login が完了したよ。token は {token_path} に保存したわ。"
+        "Gyazo OAuth login が完了しました。token は {token_path} に保存しました。"
     ))
 }
 
@@ -126,7 +123,7 @@ pub(crate) fn build_gyazo_authorize_url(app_state: &AppState, state: &str) -> Re
     let credentials = app_state
         .auth_config()
         .oauth_credentials()
-        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してね")?;
+        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してください")?;
 
     Ok(build_authorize_url(
         &credentials.client_id,
@@ -150,11 +147,14 @@ fn build_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> Stri
     format!("{AUTHORIZE_URL}?{query}")
 }
 
-pub(crate) async fn exchange_code_for_token(app_state: &AppState, code: &str) -> Result<StoredToken> {
+pub(crate) async fn exchange_code_for_token(
+    app_state: &AppState,
+    code: &str,
+) -> Result<StoredToken> {
     let credentials = app_state
         .auth_config()
         .oauth_credentials()
-        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してね")?;
+        .context("GYAZO_MCP_OAUTH_CLIENT_ID と GYAZO_MCP_OAUTH_CLIENT_SECRET を設定してください")?;
     let redirect_uri = app_state.runtime_config().oauth_callback_url();
     let response = reqwest::Client::new()
         .post(TOKEN_URL)
@@ -167,22 +167,24 @@ pub(crate) async fn exchange_code_for_token(app_state: &AppState, code: &str) ->
         ])
         .send()
         .await
-        .context("failed to call Gyazo token endpoint")?;
+        .context("Gyazo token endpoint の呼び出しに失敗しました")?;
     let status = response.status();
     let body = response
         .text()
         .await
-        .context("failed to read Gyazo token endpoint response body")?;
+        .context("Gyazo token endpoint のレスポンス本文を読み取れませんでした")?;
 
     if !status.is_success() {
-        bail!("Gyazo token exchange failed with status {status}: {body}");
+        bail!("Gyazo token の交換に失敗しました (status {status}: {body})");
     }
 
     let parsed: GyazoTokenResponse =
-        serde_json::from_str(&body).context("failed to parse Gyazo token response")?;
+        serde_json::from_str(&body).context("Gyazo token のレスポンスを解析できませんでした")?;
 
     if parsed.access_token.trim().is_empty() {
-        return Err(anyhow!("Gyazo token response did not include access_token"));
+        return Err(anyhow!(
+            "Gyazo token のレスポンスに access_token が含まれていません"
+        ));
     }
 
     Ok(StoredToken {
@@ -226,9 +228,7 @@ mod tests {
 
         assert!(url.starts_with("https://gyazo.com/oauth/authorize?"));
         assert!(url.contains("client_id=client-id"));
-        assert!(
-            url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A18449%2Foauth%2Fcallback")
-        );
+        assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A18449%2Foauth%2Fcallback"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("state=state-123"));
     }

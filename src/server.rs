@@ -16,8 +16,8 @@ use rmcp::{
 use crate::{
     app_state::{AppState, AuthorizedSession},
     gyazo_api::{
-        create_image_resource_uri, extract_image_id_from_resource_uri,
-        fetch_image_as_base64, format_image_metadata_markdown, get_image, list_images,
+        create_image_resource_uri, extract_image_id_from_resource_uri, fetch_image_as_base64,
+        format_image_metadata_markdown, get_image, list_images,
     },
     mcp_oauth::authorized_session_from_parts,
 };
@@ -53,9 +53,9 @@ impl ServerHandler for GyazoServer {
                 .build(),
             instructions: Some(
                 if has_saved_token {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_search, gyazo_list_images, gyazo_get_image, gyazo_delete_image, gyazo_get_latest_image, gyazo_upload_image, gyazo_get_oembed_metadata. Resources are available as gyazo-mcp:///image_id. Saved OAuth token detected."
+                    "Gyazo 向けのローカル HTTP MCP サーバーは利用可能です。利用可能な tools は gyazo_whoami、gyazo_search、gyazo_list_images、gyazo_get_image、gyazo_delete_image、gyazo_get_latest_image、gyazo_upload_image、gyazo_get_oembed_metadata です。Resources は gyazo-mcp:///image_id 形式で利用できます。保存済みの OAuth token を検出しました。"
                 } else {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_search, gyazo_list_images, gyazo_get_image, gyazo_delete_image, gyazo_get_latest_image, gyazo_upload_image, gyazo_get_oembed_metadata. Resources are available as gyazo-mcp:///image_id."
+                    "Gyazo 向けのローカル HTTP MCP サーバーは利用可能です。利用可能な tools は gyazo_whoami、gyazo_search、gyazo_list_images、gyazo_get_image、gyazo_delete_image、gyazo_get_latest_image、gyazo_upload_image、gyazo_get_oembed_metadata です。Resources は gyazo-mcp:///image_id 形式で利用できます。"
                 }
                 .to_string(),
             ),
@@ -88,7 +88,10 @@ impl ServerHandler for GyazoServer {
                 .map(|image| {
                     RawResource {
                         uri: create_image_resource_uri(&image.image_id),
-                        name: image.metadata.title.unwrap_or_else(|| image.image_id.clone()),
+                        name: image
+                            .metadata
+                            .title
+                            .unwrap_or_else(|| image.image_id.clone()),
                         title: None,
                         description: None,
                         mime_type: Some(format!("image/{}", image.image_type)),
@@ -116,7 +119,9 @@ impl ServerHandler for GyazoServer {
             .url
             .as_deref()
             .or(image.thumb_url.as_deref())
-            .ok_or_else(|| internal_error("Gyazo image detail did not include a usable image URL"))?;
+            .ok_or_else(|| {
+                internal_error("Gyazo image detail に利用可能な画像 URL が含まれていません")
+            })?;
         let image_binary = fetch_image_as_base64(image_url)
             .await
             .map_err(internal_error)?;
@@ -146,13 +151,16 @@ fn authorized_session_from_context(
     context: &RequestContext<rmcp::service::RoleServer>,
 ) -> Result<AuthorizedSession, rmcp::ErrorData> {
     let parts = context.extensions.get::<Parts>().ok_or_else(|| {
-        rmcp::ErrorData::invalid_params("missing request parts in request context", None)
+        rmcp::ErrorData::invalid_params("request context に request parts が含まれていません", None)
     })?;
 
     authorized_session_from_parts(app_state, parts)
         .map_err(internal_error)?
         .ok_or_else(|| {
-            rmcp::ErrorData::invalid_params("missing authorized session in request context", None)
+            rmcp::ErrorData::invalid_params(
+                "request context に authorized session が含まれていません",
+                None,
+            )
         })
 }
 

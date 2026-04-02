@@ -37,5 +37,7 @@ impl AuthConfig {
 }
 
 fn read_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|value| !value.trim().is_empty())
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }

@@ -22,7 +22,10 @@ use crate::{
         AccessTokenRecord, AppState, AuthorizationCodeGrant, AuthorizedSession,
         PendingAuthorizationRequest, RegisteredClient,
     },
-    auth::oauth::{OAuthCallbackFailure, OAuthCallbackQuery, build_gyazo_authorize_url, exchange_code_for_token},
+    auth::oauth::{
+        OAuthCallbackFailure, OAuthCallbackQuery, build_gyazo_authorize_url,
+        exchange_code_for_token,
+    },
     gyazo_api::fetch_authenticated_user,
 };
 
@@ -127,7 +130,9 @@ pub(crate) async fn authorize_handler(
     Query(query): Query<AuthorizationRequestQuery>,
 ) -> impl IntoResponse {
     match start_authorization(app_state.as_ref(), query) {
-        Ok(AuthorizationStart::Redirect(redirect)) => Redirect::temporary(&redirect).into_response(),
+        Ok(AuthorizationStart::Redirect(redirect)) => {
+            Redirect::temporary(&redirect).into_response()
+        }
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
 }
@@ -171,7 +176,7 @@ pub(crate) async fn maybe_complete_mcp_authorization(
         .take_pending_authorization(state)
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?
         .ok_or_else(|| {
-            OAuthCallbackFailure::bad_request("保留中の MCP authorization request が見つからないよ")
+            OAuthCallbackFailure::bad_request("保留中の MCP authorization request が見つかりません")
         })?;
 
     if let Some(error) = query.error.as_deref() {
@@ -182,12 +187,12 @@ pub(crate) async fn maybe_complete_mcp_authorization(
             format!(": {description}")
         };
         return Err(OAuthCallbackFailure::bad_request(format!(
-            "Gyazo OAuth がエラーを返したよ ({error}{suffix})"
+            "Gyazo OAuth がエラーを返しました ({error}{suffix})"
         )));
     }
 
     let code = query.code.as_deref().ok_or_else(|| {
-        OAuthCallbackFailure::bad_request("callback に Gyazo authorization code が含まれていないよ")
+        OAuthCallbackFailure::bad_request("callback に Gyazo authorization code が含まれていません")
     })?;
 
     let token = exchange_code_for_token(app_state, code)
@@ -196,8 +201,7 @@ pub(crate) async fn maybe_complete_mcp_authorization(
 
     let redirect_uri = pending.redirect_uri.clone();
     let client_state = pending.state.clone();
-    let authorization_code =
-        issue_authorization_code(app_state, pending, token.access_token)
+    let authorization_code = issue_authorization_code(app_state, pending, token.access_token)
         .map_err(|error| OAuthCallbackFailure::internal(error.to_string()))?;
     let redirect_uri =
         build_client_redirect_url(&redirect_uri, &authorization_code, client_state.as_deref());
@@ -214,9 +218,10 @@ fn start_authorization(
     if app_state.has_backend_api_credential()? {
         let backend_access_token = app_state
             .resolve_backend_access_token()?
-            .ok_or_else(|| anyhow!("Gyazo backend access token が見つからないよ"))?;
+            .ok_or_else(|| anyhow!("Gyazo backend access token が見つかりません"))?;
         let code = issue_authorization_code(app_state, pending.clone(), backend_access_token)?;
-        let redirect = build_client_redirect_url(&pending.redirect_uri, &code, pending.state.as_deref());
+        let redirect =
+            build_client_redirect_url(&pending.redirect_uri, &code, pending.state.as_deref());
         return Ok(AuthorizationStart::Redirect(redirect));
     }
 
@@ -234,41 +239,48 @@ fn validate_authorization_request(
     let response_type = query
         .response_type
         .as_deref()
-        .ok_or_else(|| anyhow!("response_type が必要だよ"))?;
+        .ok_or_else(|| anyhow!("response_type が必要です"))?;
     if response_type != "code" {
-        bail!("response_type は code だけを受け付けるよ");
+        bail!("response_type には code のみ指定できます");
     }
 
     let client_id = query
         .client_id
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("client_id が必要だよ"))?;
+        .ok_or_else(|| anyhow!("client_id が必要です"))?;
     let redirect_uri = query
         .redirect_uri
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("redirect_uri が必要だよ"))?;
+        .ok_or_else(|| anyhow!("redirect_uri が必要です"))?;
     let registered_client = app_state
         .registered_client(&client_id)?
-        .ok_or_else(|| anyhow!("client_id が登録されていないよ"))?;
-    if !registered_client.redirect_uris.iter().any(|uri| uri == &redirect_uri) {
-        bail!("redirect_uri が登録内容と一致しないよ");
+        .ok_or_else(|| anyhow!("client_id が登録されていません"))?;
+    if !registered_client
+        .redirect_uris
+        .iter()
+        .any(|uri| uri == &redirect_uri)
+    {
+        bail!("redirect_uri が登録内容と一致しません");
     }
     let code_challenge = query
         .code_challenge
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("code_challenge が必要だよ"))?;
+        .ok_or_else(|| anyhow!("code_challenge が必要です"))?;
     let code_challenge_method = query
         .code_challenge_method
         .unwrap_or_else(|| "plain".to_string());
 
     if code_challenge_method != "S256" {
-        bail!("code_challenge_method は S256 が必要だよ");
+        bail!("code_challenge_method には S256 を指定してください");
     }
 
     if let Some(resource) = query.resource.as_deref()
         && resource != app_state.runtime_config().mcp_url()
     {
-        bail!("resource は {} を指定してね", app_state.runtime_config().mcp_url());
+        bail!(
+            "resource には {} を指定してください",
+            app_state.runtime_config().mcp_url()
+        );
     }
 
     Ok(PendingAuthorizationRequest {
@@ -305,55 +317,55 @@ async fn exchange_authorization_code(
     let grant_type = form
         .grant_type
         .as_deref()
-        .ok_or_else(|| anyhow!("grant_type が必要だよ"))?;
+        .ok_or_else(|| anyhow!("grant_type が必要です"))?;
     if grant_type != "authorization_code" {
-        bail!("grant_type は authorization_code だけを受け付けるよ");
+        bail!("grant_type には authorization_code のみ指定できます");
     }
 
     let code = form
         .code
         .as_deref()
-        .ok_or_else(|| anyhow!("code が必要だよ"))?;
+        .ok_or_else(|| anyhow!("code が必要です"))?;
     let client_id = form
         .client_id
         .as_deref()
-        .ok_or_else(|| anyhow!("client_id が必要だよ"))?;
+        .ok_or_else(|| anyhow!("client_id が必要です"))?;
     let registered_client = app_state
         .registered_client(client_id)?
-        .ok_or_else(|| anyhow!("client_id が登録されていないよ"))?;
+        .ok_or_else(|| anyhow!("client_id が登録されていません"))?;
     let redirect_uri = form
         .redirect_uri
         .as_deref()
-        .ok_or_else(|| anyhow!("redirect_uri が必要だよ"))?;
+        .ok_or_else(|| anyhow!("redirect_uri が必要です"))?;
     if !registered_client
         .redirect_uris
         .iter()
         .any(|registered| registered == redirect_uri)
     {
-        bail!("redirect_uri が登録内容と一致しないよ");
+        bail!("redirect_uri が登録内容と一致しません");
     }
     let code_verifier = form
         .code_verifier
         .as_deref()
-        .ok_or_else(|| anyhow!("code_verifier が必要だよ"))?;
+        .ok_or_else(|| anyhow!("code_verifier が必要です"))?;
 
     let grant = app_state
         .take_authorization_code(code)?
-        .ok_or_else(|| anyhow!("authorization code が見つからないか、もう使われたよ"))?;
+        .ok_or_else(|| anyhow!("authorization code が見つからないか、すでに使用されています"))?;
 
     if grant.client_id != client_id {
-        bail!("client_id が一致しないよ");
+        bail!("client_id が一致しません");
     }
 
     if grant.redirect_uri != redirect_uri {
-        bail!("redirect_uri が一致しないよ");
+        bail!("redirect_uri が一致しません");
     }
 
     if let Some(resource) = form.resource.as_deref()
         && Some(resource) != grant.resource.as_deref()
         && resource != app_state.runtime_config().mcp_url()
     {
-        bail!("resource が一致しないよ");
+        bail!("resource が一致しません");
     }
 
     verify_pkce(code_verifier, &grant.code_challenge)?;
@@ -375,13 +387,12 @@ fn unauthorized_response(app_state: &AppState, error: Option<&str>) -> Response 
     let metadata_url = app_state.runtime_config().protected_resource_metadata_url();
     let mut response = (
         StatusCode::UNAUTHORIZED,
-        "Bearer token is required for /mcp. Use MCP login against this server first.",
+        "/mcp には Bearer token が必要です。先にこのサーバーに対して MCP login を実行してください。",
     )
         .into_response();
 
-    let mut header_value = format!(
-        r#"Bearer resource_metadata="{metadata_url}", scope="{REQUIRED_SCOPE}""#
-    );
+    let mut header_value =
+        format!(r#"Bearer resource_metadata="{metadata_url}", scope="{REQUIRED_SCOPE}""#);
     if let Some(error) = error {
         header_value.push_str(&format!(r#", error="{error}""#));
     }
@@ -455,24 +466,26 @@ fn register_client(
     let redirect_uris = request
         .redirect_uris
         .filter(|uris| !uris.is_empty())
-        .ok_or_else(|| anyhow!("redirect_uris が必要だよ"))?;
+        .ok_or_else(|| anyhow!("redirect_uris が必要です"))?;
 
     if let Some(method) = request.token_endpoint_auth_method.as_deref()
         && method != "none"
     {
-        bail!("token_endpoint_auth_method は none だけを受け付けるよ");
+        bail!("token_endpoint_auth_method には none のみ指定できます");
     }
 
     if let Some(grant_types) = request.grant_types.as_ref()
-        && !grant_types.iter().any(|grant| grant == "authorization_code")
+        && !grant_types
+            .iter()
+            .any(|grant| grant == "authorization_code")
     {
-        bail!("grant_types には authorization_code が必要だよ");
+        bail!("grant_types には authorization_code が必要です");
     }
 
     if let Some(response_types) = request.response_types.as_ref()
         && !response_types.iter().any(|response| response == "code")
     {
-        bail!("response_types には code が必要だよ");
+        bail!("response_types には code が必要です");
     }
 
     let client_name = request.client_name.filter(|name| !name.trim().is_empty());
@@ -509,7 +522,7 @@ fn verify_pkce(code_verifier: &str, code_challenge: &str) -> Result<()> {
     let actual = URL_SAFE_NO_PAD.encode(digest);
 
     if actual != code_challenge {
-        bail!("code_verifier が一致しないよ");
+        bail!("code_verifier が一致しません");
     }
 
     Ok(())

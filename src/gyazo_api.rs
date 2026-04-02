@@ -126,8 +126,10 @@ pub(crate) async fn fetch_authenticated_user(access_token: &str) -> Result<Gyazo
         .bearer_auth(access_token)
         .send()
         .await
-        .context("failed to call Gyazo users/me endpoint")?;
-    parse_json_response::<UsersMeResponse>(response, "Gyazo users/me").await.map(|parsed| parsed.user)
+        .context("Gyazo users/me endpoint の呼び出しに失敗しました")?;
+    parse_json_response::<UsersMeResponse>(response, "Gyazo users/me")
+        .await
+        .map(|parsed| parsed.user)
 }
 
 pub(crate) async fn list_images(
@@ -144,9 +146,10 @@ pub(crate) async fn list_images(
         ])
         .send()
         .await
-        .context("failed to call Gyazo images list endpoint")?;
+        .context("Gyazo images list endpoint の呼び出しに失敗しました")?;
     let headers = response.headers().clone();
-    let images = parse_json_response::<Vec<GyazoImageSummary>>(response, "Gyazo images list").await?;
+    let images =
+        parse_json_response::<Vec<GyazoImageSummary>>(response, "Gyazo images list").await?;
 
     Ok(GyazoImageListResult {
         total_count: header_u64(&headers, "X-Total-Count"),
@@ -164,7 +167,7 @@ pub(crate) async fn get_image(access_token: &str, image_ref: &str) -> Result<Gya
         .query(&[("access_token", access_token)])
         .send()
         .await
-        .context("failed to call Gyazo image detail endpoint")?;
+        .context("Gyazo image detail endpoint の呼び出しに失敗しました")?;
 
     parse_json_response::<GyazoImageDetail>(response, "Gyazo image detail").await
 }
@@ -179,7 +182,7 @@ pub(crate) async fn delete_image(
         .query(&[("access_token", access_token)])
         .send()
         .await
-        .context("failed to call Gyazo image delete endpoint")?;
+        .context("Gyazo image delete endpoint の呼び出しに失敗しました")?;
 
     parse_json_response::<GyazoDeleteImageResult>(response, "Gyazo image delete").await
 }
@@ -190,7 +193,7 @@ pub(crate) async fn get_latest_image(access_token: &str) -> Result<GyazoImageSum
         .images
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("Gyazo に画像がまだないよ"))
+        .ok_or_else(|| anyhow!("Gyazo に画像がまだありません"))
 }
 
 pub(crate) async fn search_images(
@@ -201,15 +204,15 @@ pub(crate) async fn search_images(
 ) -> Result<Vec<GyazoImageDetail>> {
     let trimmed_query = query.trim();
     if trimmed_query.is_empty() {
-        bail!("query を空にはできないよ");
+        bail!("query は空にできません");
     }
     if trimmed_query.chars().count() > 200 {
-        bail!("query は 200 文字以内にしてね");
+        bail!("query は 200 文字以内で指定してください");
     }
 
     let per = per.unwrap_or(20);
     if !(1..=100).contains(&per) {
-        bail!("per は 1 から 100 の範囲で指定してね");
+        bail!("per は 1 から 100 の範囲で指定してください");
     }
 
     let response = reqwest::Client::new()
@@ -222,15 +225,15 @@ pub(crate) async fn search_images(
         ])
         .send()
         .await
-        .context("failed to call Gyazo search endpoint")?;
+        .context("Gyazo search endpoint の呼び出しに失敗しました")?;
 
     if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
         let body = response
             .text()
             .await
-            .context("failed to read Gyazo search payment error response body")?;
+            .context("Gyazo search の課金エラーレスポンス本文を読み取れませんでした")?;
         bail!(
-            "Gyazo Search は Pro プランが必要だよ (status 402 Payment Required: {body})"
+            "Gyazo Search を利用するには Pro プランが必要です (status 402 Payment Required: {body})"
         );
     }
 
@@ -249,7 +252,7 @@ pub(crate) async fn upload_image(
             multipart::Part::bytes(image_bytes)
                 .file_name("upload.png")
                 .mime_str("image/png")
-                .context("failed to set upload image mime type")?,
+                .context("アップロード画像の MIME type を設定できませんでした")?,
         );
 
     if let Some(access_policy) = request.access_policy {
@@ -285,7 +288,7 @@ pub(crate) async fn upload_image(
         .multipart(form)
         .send()
         .await
-        .context("failed to call Gyazo upload endpoint")?;
+        .context("Gyazo upload endpoint の呼び出しに失敗しました")?;
 
     parse_json_response::<GyazoUploadImageResult>(response, "Gyazo upload").await
 }
@@ -296,7 +299,7 @@ pub(crate) async fn get_oembed(image_url: &str) -> Result<GyazoOEmbedResponse> {
         .query(&[("url", image_url)])
         .send()
         .await
-        .context("failed to call Gyazo oEmbed endpoint")?;
+        .context("Gyazo oEmbed endpoint の呼び出しに失敗しました")?;
 
     parse_json_response::<GyazoOEmbedResponse>(response, "Gyazo oEmbed").await
 }
@@ -306,7 +309,7 @@ pub(crate) async fn fetch_image_as_base64(image_url: &str) -> Result<GyazoImageB
         .get(image_url)
         .send()
         .await
-        .context("failed to fetch Gyazo image bytes")?;
+        .context("Gyazo 画像のバイト列を取得できませんでした")?;
     let status = response.status();
     let mime_type = response
         .headers()
@@ -317,10 +320,10 @@ pub(crate) async fn fetch_image_as_base64(image_url: &str) -> Result<GyazoImageB
     let bytes = response
         .bytes()
         .await
-        .context("failed to read Gyazo image bytes")?;
+        .context("Gyazo 画像のバイト列を読み取れませんでした")?;
 
     if !status.is_success() {
-        bail!("Gyazo image fetch failed with status {status}");
+        bail!("Gyazo 画像の取得に失敗しました (status {status})");
     }
 
     Ok(GyazoImageBinary {
@@ -337,7 +340,7 @@ pub(crate) fn extract_image_id_from_resource_uri(uri: &str) -> Result<String> {
     uri.strip_prefix(RESOURCE_URI_PREFIX)
         .filter(|image_id| !image_id.trim().is_empty())
         .map(ToOwned::to_owned)
-        .ok_or_else(|| anyhow!("resource URI は gyazo-mcp:///image_id の形式で指定してね"))
+        .ok_or_else(|| anyhow!("resource URI は gyazo-mcp:///image_id の形式で指定してください"))
 }
 
 pub(crate) fn format_image_metadata_markdown(image: &GyazoImageDetail) -> String {
@@ -393,40 +396,41 @@ where
     let body = response
         .text()
         .await
-        .with_context(|| format!("failed to read {label} response body"))?;
+        .with_context(|| format!("{label} のレスポンス本文を読み取れませんでした"))?;
 
     if !status.is_success() {
-        bail!("{label} failed with status {status}: {body}");
+        bail!("{label} が失敗しました (status {status}: {body})");
     }
 
-    serde_json::from_str(&body).with_context(|| format!("failed to parse {label} response"))
+    serde_json::from_str(&body)
+        .with_context(|| format!("{label} のレスポンスを解析できませんでした"))
 }
 
 fn normalize_image_id(image_ref: &str) -> Result<String> {
     let trimmed = image_ref.trim();
     if trimmed.is_empty() {
-        bail!("image_id か image_url を空にはできないよ");
+        bail!("image_id または image_url を指定してください");
     }
 
     if !trimmed.contains("://") {
         return Ok(trimmed.to_string());
     }
 
-    let url = Url::parse(trimmed).context("image_url の形式が正しくないよ")?;
+    let url = Url::parse(trimmed).context("image_url の形式が正しくありません")?;
     match url.host_str() {
         Some("gyazo.com") | Some("www.gyazo.com") => url
             .path_segments()
             .and_then(|mut segments| segments.rfind(|segment| !segment.is_empty()))
             .map(|segment| segment.to_string())
-            .ok_or_else(|| anyhow!("Gyazo ページ URL から image_id を取り出せなかったよ")),
+            .ok_or_else(|| anyhow!("Gyazo ページ URL から image_id を取得できませんでした")),
         Some("i.gyazo.com") | Some("thumb.gyazo.com") => url
             .path_segments()
             .and_then(|mut segments| segments.rfind(|segment| !segment.is_empty()))
             .and_then(|filename| filename.split('.').next())
             .filter(|segment| !segment.is_empty())
             .map(|segment| segment.to_string())
-            .ok_or_else(|| anyhow!("Gyazo 画像 URL から image_id を取り出せなかったよ")),
-        _ => bail!("Gyazo の URL だけを受け付けるよ"),
+            .ok_or_else(|| anyhow!("Gyazo 画像 URL から image_id を取得できませんでした")),
+        _ => bail!("Gyazo の URL のみ指定できます"),
     }
 }
 
@@ -438,12 +442,12 @@ fn decode_image_data(image_data: &str) -> Result<Vec<u8>> {
         .trim();
 
     if payload.is_empty() {
-        bail!("imageData が空だよ");
+        bail!("imageData が空です");
     }
 
     STANDARD
         .decode(payload)
-        .context("imageData を base64 として読めなかったよ")
+        .context("imageData を base64 として読み取れませんでした")
 }
 
 fn header_u64(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
@@ -490,13 +494,15 @@ mod tests {
 
     #[test]
     fn normalize_image_id_accepts_gyazo_page_url() {
-        let actual = normalize_image_id("https://gyazo.com/8980c52421e452ac3355ca3e5cfe7a0c").unwrap();
+        let actual =
+            normalize_image_id("https://gyazo.com/8980c52421e452ac3355ca3e5cfe7a0c").unwrap();
         assert_eq!(actual, "8980c52421e452ac3355ca3e5cfe7a0c");
     }
 
     #[test]
     fn normalize_image_id_accepts_gyazo_image_url() {
-        let actual = normalize_image_id("https://i.gyazo.com/8980c52421e452ac3355ca3e5cfe7a0c.png").unwrap();
+        let actual =
+            normalize_image_id("https://i.gyazo.com/8980c52421e452ac3355ca3e5cfe7a0c.png").unwrap();
         assert_eq!(actual, "8980c52421e452ac3355ca3e5cfe7a0c");
     }
 
