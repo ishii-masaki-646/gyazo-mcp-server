@@ -2,6 +2,8 @@
 name = "gyazo-mcp-server"
 version = "0.1.0"
 edition = "2024"
+description = "Local HTTP MCP server for Gyazo with MCP-standard login support"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0"
