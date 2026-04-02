@@ -9,10 +9,6 @@ pub(crate) fn env_file_path() -> Option<PathBuf> {
     Some(config_dir()?.join(".env"))
 }
 
-pub(crate) fn config_file_path() -> Option<PathBuf> {
-    Some(config_dir()?.join("config.toml"))
-}
-
 pub(crate) fn token_file_path() -> Option<PathBuf> {
     Some(config_dir()?.join("token.toml"))
 }

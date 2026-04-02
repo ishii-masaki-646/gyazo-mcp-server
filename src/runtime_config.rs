@@ -80,10 +80,6 @@ impl RuntimeConfig {
         format!("{}{}", self.base_url(), self.mcp_path())
     }
 
-    pub(crate) fn protected_resource_metadata_root_url(&self) -> String {
-        format!("{}{}", self.base_url(), self.protected_resource_metadata_root_path())
-    }
-
     pub(crate) fn protected_resource_metadata_url(&self) -> String {
         format!("{}{}", self.base_url(), self.protected_resource_metadata_path())
     }

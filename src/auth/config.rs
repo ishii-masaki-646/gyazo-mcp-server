@@ -20,10 +20,6 @@ impl AuthConfig {
         }
     }
 
-    pub(crate) fn has_oauth_credentials(&self) -> bool {
-        self.oauth_credentials().is_some()
-    }
-
     pub(crate) fn has_personal_access_token(&self) -> bool {
         self.personal_access_token.is_some()
     }

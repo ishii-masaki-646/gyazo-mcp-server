@@ -19,7 +19,7 @@ impl GyazoServer {
     pub(crate) fn new(app_state: Arc<AppState>) -> Result<Self> {
         Ok(Self {
             app_state,
-            tool_router: Self::basic_tool_router(),
+            tool_router: Self::gyazo_tool_router(),
         })
     }
 }
@@ -37,9 +37,9 @@ impl ServerHandler for GyazoServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
                 if has_saved_token {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, whoami, echo. Saved OAuth token detected."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_upload_image, gyazo_get_oembed_metadata. Saved OAuth token detected."
                 } else {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, whoami, echo."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_upload_image, gyazo_get_oembed_metadata."
                 }
                 .to_string(),
             ),

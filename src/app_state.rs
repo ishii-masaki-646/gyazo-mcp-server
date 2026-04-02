@@ -62,7 +62,6 @@ pub(crate) struct AccessTokenRecord {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizedSession {
-    pub(crate) access_token: String,
     pub(crate) record: AccessTokenRecord,
 }
 
@@ -240,9 +239,8 @@ impl AppState {
     }
 
     pub(crate) fn authorized_session(&self, token: &str) -> Result<Option<AuthorizedSession>> {
-        Ok(self.validate_access_token(token)?.map(|record| AuthorizedSession {
-            access_token: token.to_string(),
-            record,
-        }))
+        Ok(self
+            .validate_access_token(token)?
+            .map(|record| AuthorizedSession { record }))
     }
 }
