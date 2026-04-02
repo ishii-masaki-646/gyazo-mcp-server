@@ -1,3 +1,6 @@
 /.codex
 /.codex/*
 /target
+.env
+.env.*
+!.env.example
