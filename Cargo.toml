@@ -5,6 +5,9 @@ edition = "2024"
 description = "Local HTTP MCP server for Gyazo with MCP-standard login support"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/ishii-masaki-646/gyazo-mcp-server"
+homepage = "https://github.com/ishii-masaki-646/gyazo-mcp-server"
+documentation = "https://docs.rs/gyazo-mcp-server"
 
 [dependencies]
 anyhow = "1.0"
