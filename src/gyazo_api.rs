@@ -9,6 +9,7 @@ const SEARCH_IMAGES_URL: &str = "https://api.gyazo.com/api/search";
 const GET_IMAGE_URL_PREFIX: &str = "https://api.gyazo.com/api/images/";
 const UPLOAD_IMAGE_URL: &str = "https://upload.gyazo.com/api/upload";
 const OEMBED_URL: &str = "https://api.gyazo.com/api/oembed";
+const RESOURCE_URI_PREFIX: &str = "gyazo-mcp:///";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GyazoUserProfile {
@@ -49,6 +50,7 @@ pub(crate) struct GyazoImageDetail {
     pub(crate) image_id: String,
     pub(crate) permalink_url: Option<String>,
     pub(crate) thumb_url: Option<String>,
+    pub(crate) url: Option<String>,
     #[serde(rename = "type")]
     pub(crate) image_type: String,
     pub(crate) created_at: String,
@@ -305,6 +307,62 @@ pub(crate) async fn fetch_image_as_base64(image_url: &str) -> Result<GyazoImageB
     })
 }
 
+pub(crate) fn create_image_resource_uri(image_id: &str) -> String {
+    format!("{RESOURCE_URI_PREFIX}{image_id}")
+}
+
+pub(crate) fn extract_image_id_from_resource_uri(uri: &str) -> Result<String> {
+    uri.strip_prefix(RESOURCE_URI_PREFIX)
+        .filter(|image_id| !image_id.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow!("resource URI は gyazo-mcp:///image_id の形式で指定してね"))
+}
+
+pub(crate) fn format_image_metadata_markdown(image: &GyazoImageDetail) -> String {
+    let mut markdown = String::new();
+
+    if let Some(title) = image.metadata.title.as_deref()
+        && !title.is_empty()
+    {
+        markdown.push_str("### Title:\n");
+        markdown.push_str(title);
+        markdown.push_str("\n\n");
+    }
+    if !image.metadata.desc.is_empty() {
+        markdown.push_str("### Description:\n");
+        markdown.push_str(&image.metadata.desc);
+        markdown.push_str("\n\n");
+    }
+    if let Some(app) = image.metadata.app.as_deref()
+        && !app.is_empty()
+    {
+        markdown.push_str("### App:\n");
+        markdown.push_str(app);
+        markdown.push_str("\n\n");
+    }
+    if let Some(url) = image.metadata.url.as_deref()
+        && !url.is_empty()
+    {
+        markdown.push_str("### URL:\n");
+        markdown.push_str(url);
+        markdown.push_str("\n\n");
+    }
+    if let Some(ocr) = image.ocr.as_ref() {
+        if !ocr.description.is_empty() {
+            markdown.push_str("### OCR:\n");
+            markdown.push_str(&ocr.description);
+            markdown.push_str("\n\n");
+        }
+        if !ocr.locale.is_empty() {
+            markdown.push_str("### OCR Locale:\n");
+            markdown.push_str(&ocr.locale);
+            markdown.push_str("\n\n");
+        }
+    }
+
+    markdown
+}
+
 async fn parse_json_response<T>(response: reqwest::Response, label: &str) -> Result<T>
 where
     T: for<'de> Deserialize<'de>,
@@ -397,7 +455,10 @@ fn guess_mime_type_from_url(image_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_image_data, guess_mime_type_from_url, normalize_image_id};
+    use super::{
+        create_image_resource_uri, decode_image_data, extract_image_id_from_resource_uri,
+        guess_mime_type_from_url, normalize_image_id,
+    };
 
     #[test]
     fn normalize_image_id_accepts_raw_id() {
@@ -433,5 +494,13 @@ mod tests {
     fn guess_mime_type_from_url_prefers_extension() {
         let actual = guess_mime_type_from_url("https://i.gyazo.com/example.JPG");
         assert_eq!(actual, "image/jpeg");
+    }
+
+    #[test]
+    fn create_and_extract_resource_uri_roundtrip() {
+        let uri = create_image_resource_uri("abc123");
+        assert_eq!(uri, "gyazo-mcp:///abc123");
+        let image_id = extract_image_id_from_resource_uri(&uri).unwrap();
+        assert_eq!(image_id, "abc123");
     }
 }
