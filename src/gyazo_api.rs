@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 const USERS_ME_URL: &str = "https://api.gyazo.com/api/users/me";
 const LIST_IMAGES_URL: &str = "https://api.gyazo.com/api/images";
+const SEARCH_IMAGES_URL: &str = "https://api.gyazo.com/api/search";
 const GET_IMAGE_URL_PREFIX: &str = "https://api.gyazo.com/api/images/";
 const UPLOAD_IMAGE_URL: &str = "https://upload.gyazo.com/api/upload";
 const OEMBED_URL: &str = "https://api.gyazo.com/api/oembed";
@@ -166,6 +167,50 @@ pub(crate) async fn get_latest_image(access_token: &str) -> Result<GyazoImageSum
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("Gyazo に画像がまだないよ"))
+}
+
+pub(crate) async fn search_images(
+    access_token: &str,
+    query: &str,
+    page: Option<u32>,
+    per: Option<u32>,
+) -> Result<Vec<GyazoImageDetail>> {
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        bail!("query を空にはできないよ");
+    }
+    if trimmed_query.chars().count() > 200 {
+        bail!("query は 200 文字以内にしてね");
+    }
+
+    let per = per.unwrap_or(20);
+    if !(1..=100).contains(&per) {
+        bail!("per は 1 から 100 の範囲で指定してね");
+    }
+
+    let response = reqwest::Client::new()
+        .get(SEARCH_IMAGES_URL)
+        .query(&[
+            ("access_token", access_token.to_string()),
+            ("query", trimmed_query.to_string()),
+            ("page", page.unwrap_or(1).to_string()),
+            ("per", per.to_string()),
+        ])
+        .send()
+        .await
+        .context("failed to call Gyazo search endpoint")?;
+
+    if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+        let body = response
+            .text()
+            .await
+            .context("failed to read Gyazo search payment error response body")?;
+        bail!(
+            "Gyazo Search は Pro プランが必要だよ (status 402 Payment Required: {body})"
+        );
+    }
+
+    parse_json_response::<Vec<GyazoImageDetail>>(response, "Gyazo search").await
 }
 
 pub(crate) async fn upload_image(

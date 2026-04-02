@@ -14,7 +14,7 @@ use crate::{
     app_state::AuthorizedSession,
     gyazo_api::{
         GyazoUploadImageRequest, fetch_image_as_base64, get_image, get_latest_image, get_oembed,
-        list_images, upload_image,
+        list_images, search_images, upload_image,
     },
     server::GyazoServer,
 };
@@ -23,6 +23,13 @@ use crate::{
 struct GyazoListImagesArgs {
     page: Option<u32>,
     per_page: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GyazoSearchArgs {
+    query: String,
+    page: Option<u32>,
+    per: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -66,6 +73,20 @@ impl GyazoServer {
             "email": user.email,
             "profile_image": user.profile_image,
         }))
+    }
+
+    #[rmcp::tool(description = "Full-text search for captures uploaded by the current Gyazo user")]
+    async fn gyazo_search(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(GyazoSearchArgs { query, page, per }): Parameters<GyazoSearchArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = authorized_session(&parts)?;
+        let images = search_images(&session.record.backend_access_token, &query, page, per)
+            .await
+            .map_err(internal_error)?;
+
+        json_result(images)
     }
 
     #[rmcp::tool(description = "List the authenticated user's Gyazo images")]
