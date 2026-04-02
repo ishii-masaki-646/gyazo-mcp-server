@@ -40,6 +40,30 @@ impl RuntimeConfig {
         "/mcp"
     }
 
+    pub(crate) fn protected_resource_metadata_root_path(&self) -> &'static str {
+        "/.well-known/oauth-protected-resource"
+    }
+
+    pub(crate) fn protected_resource_metadata_path(&self) -> String {
+        format!(
+            "{}/{}",
+            self.protected_resource_metadata_root_path(),
+            self.mcp_path().trim_start_matches('/')
+        )
+    }
+
+    pub(crate) fn authorization_server_metadata_path(&self) -> &'static str {
+        "/.well-known/oauth-authorization-server"
+    }
+
+    pub(crate) fn authorization_endpoint_path(&self) -> &'static str {
+        "/authorize"
+    }
+
+    pub(crate) fn token_endpoint_path(&self) -> &'static str {
+        "/token"
+    }
+
     pub(crate) fn oauth_start_path(&self) -> &'static str {
         "/oauth/start"
     }
@@ -50,6 +74,30 @@ impl RuntimeConfig {
 
     pub(crate) fn mcp_url(&self) -> String {
         format!("{}{}", self.base_url(), self.mcp_path())
+    }
+
+    pub(crate) fn protected_resource_metadata_root_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.protected_resource_metadata_root_path())
+    }
+
+    pub(crate) fn protected_resource_metadata_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.protected_resource_metadata_path())
+    }
+
+    pub(crate) fn authorization_server_issuer(&self) -> String {
+        self.base_url()
+    }
+
+    pub(crate) fn authorization_server_metadata_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.authorization_server_metadata_path())
+    }
+
+    pub(crate) fn authorization_endpoint_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.authorization_endpoint_path())
+    }
+
+    pub(crate) fn token_endpoint_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.token_endpoint_path())
     }
 
     pub(crate) fn oauth_start_url(&self) -> String {

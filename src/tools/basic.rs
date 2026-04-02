@@ -48,11 +48,17 @@ impl GyazoServer {
         let has_personal_access_token = auth_config.has_personal_access_token();
         let bind_address = runtime_config.bind_address();
         let mcp_url = runtime_config.mcp_url();
+        let protected_resource_metadata_root_url =
+            runtime_config.protected_resource_metadata_root_url();
+        let protected_resource_metadata_url = runtime_config.protected_resource_metadata_url();
+        let authorization_server_metadata_url = runtime_config.authorization_server_metadata_url();
+        let authorization_endpoint_url = runtime_config.authorization_endpoint_url();
+        let token_endpoint_url = runtime_config.token_endpoint_url();
         let oauth_start_url = runtime_config.oauth_start_url();
         let oauth_callback_url = runtime_config.oauth_callback_url();
 
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "bind_address={bind_address}\nmcp_url={mcp_url}\noauth_start_url={oauth_start_url}\noauth_callback_url={oauth_callback_url}\nconfig_file_path={config_path}\ntoken_file_path={token_path}\nhas_saved_oauth_token={has_saved_token}\nhas_oauth_credentials={has_oauth_credentials}\nhas_personal_access_token={has_personal_access_token}"
+            "bind_address={bind_address}\nmcp_url={mcp_url}\nprotected_resource_metadata_root_url={protected_resource_metadata_root_url}\nprotected_resource_metadata_url={protected_resource_metadata_url}\nauthorization_server_metadata_url={authorization_server_metadata_url}\nauthorization_endpoint_url={authorization_endpoint_url}\ntoken_endpoint_url={token_endpoint_url}\noauth_start_url={oauth_start_url}\noauth_callback_url={oauth_callback_url}\nconfig_file_path={config_path}\ntoken_file_path={token_path}\nhas_saved_oauth_token={has_saved_token}\nhas_oauth_credentials={has_oauth_credentials}\nhas_personal_access_token={has_personal_access_token}"
         ))]))
     }
 

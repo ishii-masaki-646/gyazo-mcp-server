@@ -1,5 +1,6 @@
 mod app_state;
 mod auth;
+mod mcp_oauth;
 mod runtime_config;
 mod server;
 mod tools;
@@ -10,8 +11,9 @@ use anyhow::Result;
 use axum::{
     Router,
     extract::{Query, State},
+    middleware,
     response::{IntoResponse, Redirect},
-    routing::get,
+    routing::{get, post},
 };
 use dotenvy::{dotenv, from_path};
 use rmcp::transport::{
@@ -22,6 +24,10 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app_state::AppState;
 use crate::auth::oauth::{self, OAuthCallbackQuery};
+use crate::mcp_oauth::{
+    authorization_server_metadata_handler, authorize_placeholder_handler,
+    protected_resource_metadata_handler, require_mcp_bearer_token, token_placeholder_handler,
+};
 use crate::auth::paths;
 use crate::runtime_config::RuntimeConfig;
 use crate::server::GyazoServer;
@@ -91,21 +97,45 @@ async fn main() -> Result<()> {
             Arc::new(LocalSessionManager::default()),
             StreamableHttpServerConfig::default(),
         );
+    let mcp_routes = Router::new().nest_service(runtime_config.mcp_path(), service).route_layer(
+        middleware::from_fn_with_state(app_state.clone(), require_mcp_bearer_token),
+    );
 
     let app = Router::new()
+        .route(
+            runtime_config.protected_resource_metadata_root_path(),
+            get(protected_resource_metadata_handler),
+        )
+        .route(
+            &runtime_config.protected_resource_metadata_path(),
+            get(protected_resource_metadata_handler),
+        )
+        .route(
+            runtime_config.authorization_server_metadata_path(),
+            get(authorization_server_metadata_handler),
+        )
+        .route(
+            runtime_config.authorization_endpoint_path(),
+            get(authorize_placeholder_handler),
+        )
+        .route(runtime_config.token_endpoint_path(), post(token_placeholder_handler))
         .route("/", get(root_handler))
         .route(runtime_config.oauth_start_path(), get(oauth_start_handler))
         .route(
             runtime_config.oauth_callback_path(),
             get(oauth_callback_handler),
         )
-        .nest_service(runtime_config.mcp_path(), service)
+        .merge(mcp_routes)
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind(runtime_config.bind_address()).await?;
     tracing::info!(
         bind_address = %runtime_config.bind_address(),
         mcp_url = %runtime_config.mcp_url(),
+        protected_resource_metadata_url = %runtime_config.protected_resource_metadata_url(),
+        authorization_server_metadata_url = %runtime_config.authorization_server_metadata_url(),
+        authorization_endpoint_url = %runtime_config.authorization_endpoint_url(),
+        token_endpoint_url = %runtime_config.token_endpoint_url(),
         oauth_start_url = %runtime_config.oauth_start_url(),
         oauth_callback_url = %runtime_config.oauth_callback_url(),
         "starting gyazo mcp http server",
