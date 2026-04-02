@@ -40,12 +40,20 @@ impl RuntimeConfig {
         "/mcp"
     }
 
+    pub(crate) fn oauth_start_path(&self) -> &'static str {
+        "/oauth/start"
+    }
+
     pub(crate) fn oauth_callback_path(&self) -> &str {
         &self.oauth_callback_path
     }
 
     pub(crate) fn mcp_url(&self) -> String {
         format!("{}{}", self.base_url(), self.mcp_path())
+    }
+
+    pub(crate) fn oauth_start_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.oauth_start_path())
     }
 
     pub(crate) fn oauth_callback_url(&self) -> String {

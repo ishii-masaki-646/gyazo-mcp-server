@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use rmcp::{
     ServerHandler,
@@ -5,21 +7,18 @@ use rmcp::{
     model::{Implementation, ServerCapabilities, ServerInfo},
 };
 
-use crate::auth::state::AuthState;
-use crate::runtime_config::RuntimeConfig;
+use crate::app_state::AppState;
 
 #[derive(Clone)]
 pub(crate) struct GyazoServer {
-    pub(crate) auth_state: AuthState,
-    pub(crate) runtime_config: RuntimeConfig,
+    pub(crate) app_state: Arc<AppState>,
     pub(crate) tool_router: ToolRouter<Self>,
 }
 
 impl GyazoServer {
-    pub(crate) fn new(runtime_config: RuntimeConfig) -> Result<Self> {
+    pub(crate) fn new(app_state: Arc<AppState>) -> Result<Self> {
         Ok(Self {
-            auth_state: AuthState::load()?,
-            runtime_config,
+            app_state,
             tool_router: Self::basic_tool_router(),
         })
     }
@@ -28,13 +27,19 @@ impl GyazoServer {
 #[rmcp::tool_handler]
 impl ServerHandler for GyazoServer {
     fn get_info(&self) -> ServerInfo {
+        let has_saved_token = self
+            .app_state
+            .auth_state_snapshot()
+            .map(|state| state.has_saved_oauth_token())
+            .unwrap_or(false);
+
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                if self.auth_state.has_saved_oauth_token() {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, echo. Saved OAuth token detected."
+                if has_saved_token {
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, echo. Saved OAuth token detected."
                 } else {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, echo."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, echo."
                 }
                 .to_string(),
             ),

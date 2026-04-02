@@ -21,6 +21,17 @@ pub(crate) fn load_token(path: &Path) -> Result<Option<StoredToken>> {
     Ok(Some(token))
 }
 
+pub(crate) fn save_token(path: &Path, token: &StoredToken) -> Result<()> {
+    let raw = toml::to_string(token).context("failed to serialize token file")?;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create token directory: {}", parent.display()))?;
+    }
+
+    fs::write(path, raw).with_context(|| format!("failed to write token file: {}", path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -28,7 +39,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{StoredToken, load_token};
+    use super::{StoredToken, load_token, save_token};
 
     #[test]
     fn saves_and_loads_token_toml() {
@@ -41,10 +52,8 @@ mod tests {
         let token = StoredToken {
             access_token: "test-token".to_string(),
         };
-        let raw = toml::to_string(&token).unwrap();
-
         fs::create_dir_all(&dir).unwrap();
-        fs::write(&path, raw).unwrap();
+        save_token(&path, &token).unwrap();
         let loaded = load_token(&path).unwrap();
 
         assert_eq!(loaded, Some(token));
