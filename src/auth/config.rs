@@ -28,6 +28,10 @@ impl AuthConfig {
         self.personal_access_token.is_some()
     }
 
+    pub(crate) fn personal_access_token(&self) -> Option<String> {
+        self.personal_access_token.clone()
+    }
+
     pub(crate) fn oauth_credentials(&self) -> Option<OAuthCredentials> {
         Some(OAuthCredentials {
             client_id: self.oauth_client_id.clone()?,

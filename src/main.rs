@@ -1,5 +1,6 @@
 mod app_state;
 mod auth;
+mod gyazo_api;
 mod mcp_oauth;
 mod runtime_config;
 mod server;
@@ -27,7 +28,7 @@ use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler,
     maybe_complete_mcp_authorization, protected_resource_metadata_handler,
-    require_mcp_bearer_token, token_handler,
+    register_client_handler, require_mcp_bearer_token, token_handler,
 };
 use crate::auth::paths;
 use crate::runtime_config::RuntimeConfig;
@@ -129,6 +130,10 @@ async fn main() -> Result<()> {
             get(authorize_handler),
         )
         .route(runtime_config.token_endpoint_path(), post(token_handler))
+        .route(
+            runtime_config.registration_endpoint_path(),
+            post(register_client_handler),
+        )
         .route("/", get(root_handler))
         .route(runtime_config.oauth_start_path(), get(oauth_start_handler))
         .route(
@@ -146,6 +151,7 @@ async fn main() -> Result<()> {
         authorization_server_metadata_url = %runtime_config.authorization_server_metadata_url(),
         authorization_endpoint_url = %runtime_config.authorization_endpoint_url(),
         token_endpoint_url = %runtime_config.token_endpoint_url(),
+        registration_endpoint_url = %runtime_config.registration_endpoint_url(),
         oauth_start_url = %runtime_config.oauth_start_url(),
         oauth_callback_url = %runtime_config.oauth_callback_url(),
         "starting gyazo mcp http server",

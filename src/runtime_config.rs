@@ -64,6 +64,10 @@ impl RuntimeConfig {
         "/token"
     }
 
+    pub(crate) fn registration_endpoint_path(&self) -> &'static str {
+        "/register"
+    }
+
     pub(crate) fn oauth_start_path(&self) -> &'static str {
         "/oauth/start"
     }
@@ -98,6 +102,10 @@ impl RuntimeConfig {
 
     pub(crate) fn token_endpoint_url(&self) -> String {
         format!("{}{}", self.base_url(), self.token_endpoint_path())
+    }
+
+    pub(crate) fn registration_endpoint_url(&self) -> String {
+        format!("{}{}", self.base_url(), self.registration_endpoint_path())
     }
 
     pub(crate) fn oauth_start_url(&self) -> String {

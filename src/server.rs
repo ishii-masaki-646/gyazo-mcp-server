@@ -37,9 +37,9 @@ impl ServerHandler for GyazoServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
                 if has_saved_token {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, echo. Saved OAuth token detected."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, whoami, echo. Saved OAuth token detected."
                 } else {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, echo."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, oauth_login, whoami, echo."
                 }
                 .to_string(),
             ),

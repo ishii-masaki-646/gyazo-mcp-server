@@ -17,8 +17,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    app_state::{AccessTokenRecord, AppState, AuthorizationCodeGrant, PendingAuthorizationRequest},
+    app_state::{
+        AccessTokenRecord, AppState, AuthorizationCodeGrant, AuthorizedSession,
+        PendingAuthorizationRequest, RegisteredClient,
+    },
     auth::oauth::{OAuthCallbackFailure, OAuthCallbackQuery, build_gyazo_authorize_url, exchange_code_for_token},
+    gyazo_api::fetch_authenticated_user,
 };
 
 const REQUIRED_SCOPE: &str = "gyazo";
@@ -35,6 +39,7 @@ pub(crate) struct AuthorizationServerMetadata {
     issuer: String,
     authorization_endpoint: String,
     token_endpoint: String,
+    registration_endpoint: String,
     response_types_supported: Vec<String>,
     grant_types_supported: Vec<String>,
     token_endpoint_auth_methods_supported: Vec<String>,
@@ -70,14 +75,36 @@ pub(crate) struct TokenResponse {
     scope: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct DynamicClientRegistrationRequest {
+    redirect_uris: Option<Vec<String>>,
+    client_name: Option<String>,
+    grant_types: Option<Vec<String>>,
+    response_types: Option<Vec<String>>,
+    token_endpoint_auth_method: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DynamicClientRegistrationResponse {
+    client_id: String,
+    redirect_uris: Vec<String>,
+    client_name: Option<String>,
+    grant_types: Vec<String>,
+    response_types: Vec<String>,
+    token_endpoint_auth_method: String,
+}
+
 pub(crate) async fn require_mcp_bearer_token(
     State(app_state): State<Arc<AppState>>,
-    request: Request<Body>,
+    mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    match validate_bearer_token(app_state.as_ref(), &request) {
-        Ok(true) => next.run(request).await,
-        Ok(false) => unauthorized_response(app_state.as_ref(), Some("invalid_token")),
+    match authorized_session_from_request(app_state.as_ref(), &request) {
+        Ok(Some(session)) => {
+            request.extensions_mut().insert(session);
+            next.run(request).await
+        }
+        Ok(None) => unauthorized_response(app_state.as_ref(), Some("invalid_token")),
         Err(_) => unauthorized_response(app_state.as_ref(), Some("server_error")),
     }
 }
@@ -108,8 +135,18 @@ pub(crate) async fn token_handler(
     State(app_state): State<Arc<AppState>>,
     Form(form): Form<TokenRequestForm>,
 ) -> impl IntoResponse {
-    match exchange_authorization_code(app_state.as_ref(), form) {
+    match exchange_authorization_code(app_state.as_ref(), form).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    }
+}
+
+pub(crate) async fn register_client_handler(
+    State(app_state): State<Arc<AppState>>,
+    Json(request): Json<DynamicClientRegistrationRequest>,
+) -> impl IntoResponse {
+    match register_client(app_state.as_ref(), request) {
+        Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
 }
@@ -209,6 +246,12 @@ fn validate_authorization_request(
         .redirect_uri
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("redirect_uri が必要だよ"))?;
+    let registered_client = app_state
+        .registered_client(&client_id)?
+        .ok_or_else(|| anyhow!("client_id が登録されていないよ"))?;
+    if !registered_client.redirect_uris.iter().any(|uri| uri == &redirect_uri) {
+        bail!("redirect_uri が登録内容と一致しないよ");
+    }
     let code_challenge = query
         .code_challenge
         .filter(|value| !value.trim().is_empty())
@@ -241,18 +284,25 @@ fn issue_authorization_code(
     app_state: &AppState,
     pending: PendingAuthorizationRequest,
 ) -> Result<String> {
+    let backend_access_token = app_state
+        .resolve_backend_access_token()?
+        .ok_or_else(|| anyhow!("Gyazo backend access token が見つからないよ"))?;
     let grant = AuthorizationCodeGrant {
         client_id: pending.client_id,
         redirect_uri: pending.redirect_uri,
         code_challenge: pending.code_challenge,
         resource: pending.resource,
         scope: normalize_scope(pending.requested_scope.as_deref()),
+        backend_access_token,
     };
 
     app_state.issue_authorization_code(grant)
 }
 
-fn exchange_authorization_code(app_state: &AppState, form: TokenRequestForm) -> Result<TokenResponse> {
+async fn exchange_authorization_code(
+    app_state: &AppState,
+    form: TokenRequestForm,
+) -> Result<TokenResponse> {
     let grant_type = form
         .grant_type
         .as_deref()
@@ -269,10 +319,20 @@ fn exchange_authorization_code(app_state: &AppState, form: TokenRequestForm) -> 
         .client_id
         .as_deref()
         .ok_or_else(|| anyhow!("client_id が必要だよ"))?;
+    let registered_client = app_state
+        .registered_client(client_id)?
+        .ok_or_else(|| anyhow!("client_id が登録されていないよ"))?;
     let redirect_uri = form
         .redirect_uri
         .as_deref()
         .ok_or_else(|| anyhow!("redirect_uri が必要だよ"))?;
+    if !registered_client
+        .redirect_uris
+        .iter()
+        .any(|registered| registered == redirect_uri)
+    {
+        bail!("redirect_uri が登録内容と一致しないよ");
+    }
     let code_verifier = form
         .code_verifier
         .as_deref()
@@ -299,7 +359,11 @@ fn exchange_authorization_code(app_state: &AppState, form: TokenRequestForm) -> 
 
     verify_pkce(code_verifier, &grant.code_challenge)?;
 
-    let access_token = app_state.issue_access_token(AccessTokenRecord)?;
+    let gyazo_user = fetch_authenticated_user(&grant.backend_access_token).await?;
+    let access_token = app_state.issue_access_token(AccessTokenRecord {
+        backend_access_token: grant.backend_access_token,
+        gyazo_user,
+    })?;
 
     Ok(TokenResponse {
         access_token,
@@ -330,12 +394,15 @@ fn unauthorized_response(app_state: &AppState, error: Option<&str>) -> Response 
     response
 }
 
-fn validate_bearer_token(app_state: &AppState, request: &Request<Body>) -> Result<bool> {
+pub(crate) fn authorized_session_from_request(
+    app_state: &AppState,
+    request: &Request<Body>,
+) -> Result<Option<AuthorizedSession>> {
     let Some(token) = extract_bearer_token(request) else {
-        return Ok(false);
+        return Ok(None);
     };
 
-    Ok(app_state.validate_access_token(token)?.is_some())
+    app_state.authorized_session(token)
 }
 
 fn extract_bearer_token(request: &Request<Body>) -> Option<&str> {
@@ -363,11 +430,54 @@ fn build_authorization_server_metadata(app_state: &AppState) -> AuthorizationSer
         issuer: runtime_config.authorization_server_issuer(),
         authorization_endpoint: runtime_config.authorization_endpoint_url(),
         token_endpoint: runtime_config.token_endpoint_url(),
+        registration_endpoint: runtime_config.registration_endpoint_url(),
         response_types_supported: vec!["code".to_string()],
         grant_types_supported: vec!["authorization_code".to_string()],
         token_endpoint_auth_methods_supported: vec!["none".to_string()],
         code_challenge_methods_supported: vec!["S256".to_string()],
     }
+}
+
+fn register_client(
+    app_state: &AppState,
+    request: DynamicClientRegistrationRequest,
+) -> Result<DynamicClientRegistrationResponse> {
+    let redirect_uris = request
+        .redirect_uris
+        .filter(|uris| !uris.is_empty())
+        .ok_or_else(|| anyhow!("redirect_uris が必要だよ"))?;
+
+    if let Some(method) = request.token_endpoint_auth_method.as_deref()
+        && method != "none"
+    {
+        bail!("token_endpoint_auth_method は none だけを受け付けるよ");
+    }
+
+    if let Some(grant_types) = request.grant_types.as_ref()
+        && !grant_types.iter().any(|grant| grant == "authorization_code")
+    {
+        bail!("grant_types には authorization_code が必要だよ");
+    }
+
+    if let Some(response_types) = request.response_types.as_ref()
+        && !response_types.iter().any(|response| response == "code")
+    {
+        bail!("response_types には code が必要だよ");
+    }
+
+    let client_name = request.client_name.filter(|name| !name.trim().is_empty());
+    let client_id = app_state.register_client(RegisteredClient {
+        redirect_uris: redirect_uris.clone(),
+    })?;
+
+    Ok(DynamicClientRegistrationResponse {
+        client_id,
+        redirect_uris,
+        client_name,
+        grant_types: vec!["authorization_code".to_string()],
+        response_types: vec!["code".to_string()],
+        token_endpoint_auth_method: "none".to_string(),
+    })
 }
 
 fn build_client_redirect_url(base: &str, code: &str, state: Option<&str>) -> String {
