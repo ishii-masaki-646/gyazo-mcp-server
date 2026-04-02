@@ -77,6 +77,13 @@ pub(crate) struct GyazoUploadImageResult {
     pub(crate) image_type: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GyazoDeleteImageResult {
+    pub(crate) image_id: String,
+    #[serde(rename = "type")]
+    pub(crate) image_type: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct GyazoUploadImageRequest {
     pub(crate) image_data: String,
@@ -160,6 +167,21 @@ pub(crate) async fn get_image(access_token: &str, image_ref: &str) -> Result<Gya
         .context("failed to call Gyazo image detail endpoint")?;
 
     parse_json_response::<GyazoImageDetail>(response, "Gyazo image detail").await
+}
+
+pub(crate) async fn delete_image(
+    access_token: &str,
+    image_ref: &str,
+) -> Result<GyazoDeleteImageResult> {
+    let image_id = normalize_image_id(image_ref)?;
+    let response = reqwest::Client::new()
+        .delete(format!("{GET_IMAGE_URL_PREFIX}{image_id}"))
+        .query(&[("access_token", access_token)])
+        .send()
+        .await
+        .context("failed to call Gyazo image delete endpoint")?;
+
+    parse_json_response::<GyazoDeleteImageResult>(response, "Gyazo image delete").await
 }
 
 pub(crate) async fn get_latest_image(access_token: &str) -> Result<GyazoImageSummary> {

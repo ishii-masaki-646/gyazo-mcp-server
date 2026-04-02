@@ -13,8 +13,8 @@ use serde_json::json;
 use crate::{
     app_state::AuthorizedSession,
     gyazo_api::{
-        GyazoUploadImageRequest, fetch_image_as_base64, get_image, get_latest_image, get_oembed,
-        list_images, search_images, upload_image,
+        GyazoUploadImageRequest, delete_image, fetch_image_as_base64, get_image,
+        get_latest_image, get_oembed, list_images, search_images, upload_image,
     },
     server::GyazoServer,
 };
@@ -116,6 +116,21 @@ impl GyazoServer {
             .map_err(internal_error)?;
 
         json_result(image)
+    }
+
+    #[rmcp::tool(description = "Delete a single Gyazo image by image ID or Gyazo URL")]
+    async fn gyazo_delete_image(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<GyazoGetImageArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = authorized_session(&parts)?;
+        let image_ref = select_image_ref(args)?;
+        let deleted = delete_image(&session.record.backend_access_token, &image_ref)
+            .await
+            .map_err(internal_error)?;
+
+        json_result(deleted)
     }
 
     #[rmcp::tool(description = "Get the latest Gyazo image with its image content and metadata")]
