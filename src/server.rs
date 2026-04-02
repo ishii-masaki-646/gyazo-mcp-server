@@ -6,17 +6,20 @@ use rmcp::{
 };
 
 use crate::auth::state::AuthState;
+use crate::runtime_config::RuntimeConfig;
 
 #[derive(Clone)]
 pub(crate) struct GyazoServer {
     pub(crate) auth_state: AuthState,
+    pub(crate) runtime_config: RuntimeConfig,
     pub(crate) tool_router: ToolRouter<Self>,
 }
 
 impl GyazoServer {
-    pub(crate) fn new() -> Result<Self> {
+    pub(crate) fn new(runtime_config: RuntimeConfig) -> Result<Self> {
         Ok(Self {
             auth_state: AuthState::load()?,
+            runtime_config,
             tool_router: Self::basic_tool_router(),
         })
     }
@@ -29,9 +32,9 @@ impl ServerHandler for GyazoServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
                 if self.auth_state.has_saved_oauth_token() {
-                    "Minimal RMCP bootstrap for the Gyazo MCP server. Available tools: ping, echo. Saved OAuth token detected."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, echo. Saved OAuth token detected."
                 } else {
-                    "Minimal RMCP bootstrap for the Gyazo MCP server. Available tools: ping, echo."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: ping, auth_status, echo."
                 }
                 .to_string(),
             ),

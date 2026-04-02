@@ -40,9 +40,12 @@ impl GyazoServer {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "(unavailable)".to_string());
         let has_saved_token = self.auth_state.has_saved_oauth_token();
+        let bind_address = self.runtime_config.bind_address();
+        let mcp_url = self.runtime_config.mcp_url();
+        let oauth_callback_url = self.runtime_config.oauth_callback_url();
 
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "config_file_path={config_path}\ntoken_file_path={token_path}\nhas_saved_oauth_token={has_saved_token}"
+            "bind_address={bind_address}\nmcp_url={mcp_url}\noauth_callback_url={oauth_callback_url}\nconfig_file_path={config_path}\ntoken_file_path={token_path}\nhas_saved_oauth_token={has_saved_token}"
         ))]))
     }
 
