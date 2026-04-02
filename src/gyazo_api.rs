@@ -99,6 +99,12 @@ pub(crate) struct GyazoOEmbedResponse {
     pub(crate) height: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GyazoImageBinary {
+    pub(crate) data: String,
+    pub(crate) mime_type: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct UsersMeResponse {
     user: GyazoUserProfile,
@@ -151,6 +157,15 @@ pub(crate) async fn get_image(access_token: &str, image_ref: &str) -> Result<Gya
         .context("failed to call Gyazo image detail endpoint")?;
 
     parse_json_response::<GyazoImageDetail>(response, "Gyazo image detail").await
+}
+
+pub(crate) async fn get_latest_image(access_token: &str) -> Result<GyazoImageSummary> {
+    let listed = list_images(access_token, Some(1), Some(1)).await?;
+    listed
+        .images
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("Gyazo に画像がまだないよ"))
 }
 
 pub(crate) async fn upload_image(
@@ -215,6 +230,34 @@ pub(crate) async fn get_oembed(image_url: &str) -> Result<GyazoOEmbedResponse> {
         .context("failed to call Gyazo oEmbed endpoint")?;
 
     parse_json_response::<GyazoOEmbedResponse>(response, "Gyazo oEmbed").await
+}
+
+pub(crate) async fn fetch_image_as_base64(image_url: &str) -> Result<GyazoImageBinary> {
+    let response = reqwest::Client::new()
+        .get(image_url)
+        .send()
+        .await
+        .context("failed to fetch Gyazo image bytes")?;
+    let status = response.status();
+    let mime_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| guess_mime_type_from_url(image_url));
+    let bytes = response
+        .bytes()
+        .await
+        .context("failed to read Gyazo image bytes")?;
+
+    if !status.is_success() {
+        bail!("Gyazo image fetch failed with status {status}");
+    }
+
+    Ok(GyazoImageBinary {
+        data: STANDARD.encode(bytes),
+        mime_type,
+    })
 }
 
 async fn parse_json_response<T>(response: reqwest::Response, label: &str) -> Result<T>
@@ -292,9 +335,24 @@ fn header_string(headers: &reqwest::header::HeaderMap, name: &str) -> Option<Str
         .map(ToOwned::to_owned)
 }
 
+fn guess_mime_type_from_url(image_url: &str) -> String {
+    let lower = image_url.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png".to_string()
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg".to_string()
+    } else if lower.ends_with(".gif") {
+        "image/gif".to_string()
+    } else if lower.ends_with(".webp") {
+        "image/webp".to_string()
+    } else {
+        "application/octet-stream".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decode_image_data, normalize_image_id};
+    use super::{decode_image_data, guess_mime_type_from_url, normalize_image_id};
 
     #[test]
     fn normalize_image_id_accepts_raw_id() {
@@ -324,5 +382,11 @@ mod tests {
     fn decode_image_data_accepts_data_url_prefix() {
         let actual = decode_image_data("data:image/png;base64,SGVsbG8=").unwrap();
         assert_eq!(actual, b"Hello");
+    }
+
+    #[test]
+    fn guess_mime_type_from_url_prefers_extension() {
+        let actual = guess_mime_type_from_url("https://i.gyazo.com/example.JPG");
+        assert_eq!(actual, "image/jpeg");
     }
 }

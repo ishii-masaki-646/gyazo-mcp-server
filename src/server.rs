@@ -37,9 +37,9 @@ impl ServerHandler for GyazoServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
                 if has_saved_token {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_upload_image, gyazo_get_oembed_metadata. Saved OAuth token detected."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_get_latest_image, gyazo_upload_image, gyazo_get_oembed_metadata. Saved OAuth token detected."
                 } else {
-                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_upload_image, gyazo_get_oembed_metadata."
+                    "Local HTTP MCP server for Gyazo is ready. Available tools: gyazo_whoami, gyazo_list_images, gyazo_get_image, gyazo_get_latest_image, gyazo_upload_image, gyazo_get_oembed_metadata."
                 }
                 .to_string(),
             ),

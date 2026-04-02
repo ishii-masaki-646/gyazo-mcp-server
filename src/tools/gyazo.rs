@@ -13,7 +13,8 @@ use serde_json::json;
 use crate::{
     app_state::AuthorizedSession,
     gyazo_api::{
-        GyazoUploadImageRequest, get_image, get_oembed, list_images, upload_image,
+        GyazoUploadImageRequest, fetch_image_as_base64, get_image, get_latest_image, get_oembed,
+        list_images, upload_image,
     },
     server::GyazoServer,
 };
@@ -94,6 +95,27 @@ impl GyazoServer {
             .map_err(internal_error)?;
 
         json_result(image)
+    }
+
+    #[rmcp::tool(description = "Get the latest Gyazo image with its image content and metadata")]
+    async fn gyazo_get_latest_image(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = authorized_session(&parts)?;
+        let image = get_latest_image(&session.record.backend_access_token)
+            .await
+            .map_err(internal_error)?;
+        let binary = fetch_image_as_base64(&image.url)
+            .await
+            .map_err(internal_error)?;
+
+        Ok(CallToolResult::success(vec![
+            Content::image(binary.data, binary.mime_type),
+            Content::text(
+                serde_json::to_string_pretty(&image).map_err(internal_error)?,
+            ),
+        ]))
     }
 
     #[rmcp::tool(description = "Upload a base64 image to Gyazo")]
