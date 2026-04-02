@@ -1,6 +1,50 @@
 # gyazo-mcp-server
 
+[![crates.io](https://img.shields.io/crates/v/gyazo-mcp-server.svg)](https://crates.io/crates/gyazo-mcp-server)
+[![docs.rs](https://img.shields.io/docsrs/gyazo-mcp-server)](https://docs.rs/gyazo-mcp-server)
+[![license](https://img.shields.io/crates/l/gyazo-mcp-server.svg)](https://github.com/ishii-masaki-646/gyazo-mcp-server)
+
 Gyazo 向けのローカル HTTP MCP サーバーです。`/mcp` の streamable HTTP transport と、MCP 標準 login に準拠した認証 broker を備えています。
+
+## Features
+
+- streamable HTTP transport によるローカル MCP サーバー
+- MCP 標準 login に対応した OAuth broker
+- Gyazo の `list / get / latest / search / upload / delete / oEmbed` tools
+- `gyazo-mcp:///image_id` 形式の resources
+
+## Available Tools
+
+- `gyazo_whoami`
+- `gyazo_search`
+- `gyazo_list_images`
+- `gyazo_get_image`
+- `gyazo_delete_image`
+- `gyazo_get_latest_image`
+- `gyazo_upload_image`
+- `gyazo_get_oembed_metadata`
+
+## Install
+
+crates.io からインストールする場合は、次のコマンドを使用します。
+
+```bash
+cargo install gyazo-mcp-server
+```
+
+インストール後のバイナリは通常 `~/.cargo/bin/gyazo-mcp-server` に配置されます。
+
+ローカルソースからインストールする場合は、次のコマンドを使用します。
+
+```bash
+cargo install --path .
+```
+
+アンインストールは次のとおりです。
+
+```bash
+cargo uninstall gyazo-mcp-server
+```
 
 ## Build
 
@@ -22,22 +66,6 @@ cargo build --release
 target/release/gyazo-mcp-server
 ```
 
-## Install
-
-ローカルの Cargo bin へグローバルインストールする場合は、次のコマンドを使用します。
-
-```bash
-cargo install --path .
-```
-
-インストール後のバイナリは通常 `~/.cargo/bin/gyazo-mcp-server` に配置されます。
-
-アンインストールは次のとおりです。
-
-```bash
-cargo uninstall gyazo-mcp-server
-```
-
 ## Config
 
 設定は `~/.config/gyazo-mcp-server/.env` に配置する想定です。
@@ -49,6 +77,8 @@ GYAZO_MCP_OAUTH_CLIENT_ID=your-client-id
 GYAZO_MCP_OAUTH_CLIENT_SECRET=your-client-secret
 GYAZO_MCP_PERSONAL_ACCESS_TOKEN=your-personal-access-token
 ```
+
+`GYAZO_MCP_OAUTH_CLIENT_ID` と `GYAZO_MCP_OAUTH_CLIENT_SECRET` を設定すると MCP login を利用できます。`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は簡易確認や個人利用向けの代替手段です。
 
 ## Gyazo OAuth Application
 
@@ -63,6 +93,8 @@ OAuth login を利用する場合は、Gyazo の開発者ページで OAuth Appl
 
 まずローカルで動作確認したいだけであれば、Gyazo の開発者ページで発行できる Personal Access Token を `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` に設定して利用することもできます。ただし、PAT で取得できるのは原則としてそのトークンを発行したユーザーに紐づく画像のみで、他ユーザーがアップロードした public 画像を取得する用途には向きません。
 
+## Run
+
 起動コマンドは次のとおりです。
 
 ```bash
@@ -70,6 +102,8 @@ gyazo-mcp-server
 ```
 
 MCP endpoint は既定で `http://127.0.0.1:18449/mcp` です。
+
+Codex や Claude Code から利用する場合は、この endpoint を MCP server URL として登録し、MCP login を実行してください。
 
 ## License
 
