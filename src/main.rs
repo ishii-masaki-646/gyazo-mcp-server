@@ -1,22 +1,17 @@
+mod auth;
 mod server;
 mod tools;
-
-use std::{env, path::PathBuf};
 
 use anyhow::Result;
 use dotenvy::{dotenv, from_path};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
+use crate::auth::paths;
 use crate::server::GyazoServer;
 
-fn config_dir_env_path() -> Option<PathBuf> {
-    let home = env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config/gyazo-mcp-server/.env"))
-}
-
 fn load_env_files() -> Result<()> {
-    if let Some(path) = config_dir_env_path()
+    if let Some(path) = paths::env_file_path()
         && path.exists()
     {
         from_path(path)?;
@@ -43,7 +38,7 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let service = GyazoServer::new().serve(stdio()).await?;
+    let service = GyazoServer::new()?.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
 }
