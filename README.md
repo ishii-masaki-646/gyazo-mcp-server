@@ -88,6 +88,12 @@ GYAZO_MCP_PERSONAL_ACCESS_TOKEN=your-personal-access-token
 
 `tcp_port`、`oauth_callback_path`、`rust_log` は `config.toml` で管理し、`GYAZO_MCP_OAUTH_CLIENT_ID` と `GYAZO_MCP_OAUTH_CLIENT_SECRET` は `.env` で管理します。`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は簡易確認や個人利用向けの代替手段です。
 
+一時的に設定を上書きしたい場合は、環境変数でも指定できます。`tcp_port` を一時的に変更する場合は、`GYAZO_MCP_TCP_PORT` を使用してください。
+
+```bash
+GYAZO_MCP_TCP_PORT=14861 gyazo-mcp-server stdio --auth
+```
+
 ## Gyazo OAuth Application
 
 OAuth login を利用する場合は、Gyazo の開発者ページで OAuth Application を作成してください。
@@ -99,7 +105,7 @@ OAuth login を利用する場合は、Gyazo の開発者ページで OAuth Appl
 
 既定値では `redirect_uri` は `http://127.0.0.1:18449/oauth/callback` です。`config.toml` の `tcp_port` または `oauth_callback_path` を変更する場合は、Gyazo 側に登録する `redirect_uri` も同じ値へ合わせてください。
 
-まずローカルで動作確認したいだけであれば、Gyazo の開発者ページで発行できる Personal Access Token を `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` に設定して利用することもできます。ただし、PAT で取得できるのは原則としてそのトークンを発行したユーザーに紐づく画像のみで、他ユーザーがアップロードした public 画像を取得する用途には向きません。
+まずローカルで動作確認したいだけであれば、Gyazo の開発者ページで発行できる Personal Access Token を `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` に設定して利用することもできます。ただし、PAT で取得できるのは原則としてそのトークンを発行したユーザーに紐づく画像のみで、他ユーザーがアップロードした public 画像を取得する用途には向きません。また、PAT には OAuth login のようなユーザー認証文脈に基づく権限はないため、MCP login や user-scoped な認可の代替にはなりません。
 
 ## Run
 
@@ -131,6 +137,44 @@ gyazo-mcp-server stdio --auth
 ```
 
 このコマンドは一時的に callback 用のローカル HTTP サーバーを立てて、Gyazo OAuth を完了させたら token を保存して終了します。完了後は通常どおり `gyazo-mcp-server stdio` を client から起動してください。
+
+`stdio --auth` を使う場合は、次の条件が必要です。
+
+- Gyazo OAuth の authorize URL を開けるブラウザ、または同等の認可手段があること
+- `http://127.0.0.1:<port><callback_path>` への callback を受け取れること
+
+完全な非対話環境では、OAuth の代わりに `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を利用する方が現実的です。ただし、PAT は OAuth login のようなユーザー認証文脈の権限を持たないため、利用できる操作やアクセス範囲は限定されます。
+
+## Stdio Client Examples
+
+### Codex CLI
+
+Codex CLI では、たとえば次のように TOML で設定できます。
+
+```toml
+[mcp_servers.gyazo]
+command = "/home/yourname/.cargo/bin/gyazo-mcp-server"
+args = ["stdio"]
+```
+
+`stdio --auth` を先に一度実行して token を保存しておくか、`.env` に `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を設定してください。
+
+### Claude Desktop / Claude Code
+
+Claude Desktop や Claude Code 系では、たとえば次のように JSON で設定できます。
+
+```json
+{
+  "mcpServers": {
+    "gyazo": {
+      "command": "/home/yourname/.cargo/bin/gyazo-mcp-server",
+      "args": ["stdio"]
+    }
+  }
+}
+```
+
+こちらも、事前に `gyazo-mcp-server stdio --auth` を一度実行して token を保存しておくか、`.env` に `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を設定してください。
 
 将来的な `config` や `env` などの拡張を見据えて、CLI は subcommand ベースになっています。
 

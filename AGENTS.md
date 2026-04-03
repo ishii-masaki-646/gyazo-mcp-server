@@ -30,4 +30,11 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 履歴はまだ少ないため、コミットメッセージは `Add Gyazo upload client` のような命令形で、短く明確に記述してください。件名は 72 文字前後までに収め、1コミットごとにレビューしやすい単位へ分けてください。プルリクエストには変更概要、実行した確認コマンド（`cargo build`、`cargo test`、`cargo clippy` など）、設定やプロトコルに関する前提があればそれも記載してください。MCP の挙動を変える場合は、リクエストやレスポンスの例も添えると分かりやすくなります。
 
 ## 設定とセキュリティ
-`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないでください。.env 系ファイルはローカル専用として扱い、必要な場合は `.env.example` のみを共有してください。HTTP transport の MCP クライアント設定では `env` が使えない場合があるため、`GYAZO_MCP_TCP_PORT`、`GYAZO_MCP_OAUTH_CALLBACK_PATH`、`client_id`、`client_secret`、`PAT` はまとめて `~/.config/gyazo-mcp-server/.env` から読む前提にすると運用しやすくなります。設定例が必要な場合は、実値ではなくプレースホルダーを用い、必要なキーは PR か README に記載して共有してください。
+`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないでください。.env 系ファイルはローカル専用として扱い、必要な場合は `.env.example` のみを共有してください。動作設定は `~/.config/gyazo-mcp-server/config.toml`、認証情報は `~/.config/gyazo-mcp-server/.env` に分けて扱ってください。`tcp_port`、`oauth_callback_path`、`rust_log` は `config.toml` を正とし、一時上書きが必要な場合だけ `GYAZO_MCP_TCP_PORT`、`GYAZO_MCP_OAUTH_CALLBACK_PATH`、`RUST_LOG` を使ってください。`GYAZO_MCP_OAUTH_CLIENT_ID`、`GYAZO_MCP_OAUTH_CLIENT_SECRET`、`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は `.env` で管理してください。設定例が必要な場合は、実値ではなくプレースホルダーを用い、必要なキーは PR か README に記載して共有してください。
+
+## Transport 運用メモ
+- HTTP transport は `/mcp` endpoint を利用し、MCP login 対応 client からの利用を基本としてください。
+- stdio transport は `gyazo-mcp-server stdio` で起動してください。
+- MCP login 非対応 client 向けの認証準備は `gyazo-mcp-server stdio --auth` を案内してください。
+- `stdio --auth` は一時的なローカル callback サーバーとブラウザ認可を必要とするため、その前提も README に明記してください。
+- client 設定例を追加する場合は、少なくとも TOML 形式 1 例と JSON 形式 1 例を維持してください。
