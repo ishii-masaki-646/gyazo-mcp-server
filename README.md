@@ -310,6 +310,43 @@ systemd が存在しない Linux 環境や BSD 等では、手動でサービス
 
 `--config-dir` で一時的に設定ディレクトリを変更した状態で `service install` を実行すると、常駐後のサービスが異なる設定を参照する可能性があるため、警告と確認が表示されます。常駐化する場合は、先に `config set config_dir` で永続化してください。
 
+## HTTP Client Examples
+
+### Codex CLI
+
+```toml
+[mcp_servers.gyazo]
+type = "url"
+url = "http://127.0.0.1:18449/mcp"
+```
+
+### Claude Code
+
+```json
+{
+  "mcpServers": {
+    "gyazo": {
+      "type": "url",
+      "url": "http://127.0.0.1:18449/mcp"
+    }
+  }
+}
+```
+
+上記の URL は既定値です。`tcp_port` や `base_url` を変更した場合は `gyazo-mcp-server config show` で確認し、URL を合わせてください。
+
+HTTP transport では事前に `gyazo-mcp-server` を起動しておき、クライアント側で MCP login を実行してください。
+
+**Codex CLI の場合:**
+
+```bash
+codex mcp login gyazo
+```
+
+**Claude Code の場合:**
+
+`/mcp` コマンドを実行し、Gyazo MCP Server の Authenticate を選択してください。
+
 ## Stdio Client Examples
 
 ### Codex CLI
