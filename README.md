@@ -68,17 +68,25 @@ target/release/gyazo-mcp-server
 
 ## Config
 
-設定は `~/.config/gyazo-mcp-server/.env` に配置する想定です。
+動作設定は `~/.config/gyazo-mcp-server/config.toml`、認証情報は `~/.config/gyazo-mcp-server/.env` に配置する想定です。
+
+`config.toml`:
+
+```toml
+tcp_port = 18449
+oauth_callback_path = "/oauth/callback"
+rust_log = "gyazo_mcp_server=info,rmcp=info"
+```
+
+`.env`:
 
 ```env
-GYAZO_MCP_TCP_PORT=18449
-GYAZO_MCP_OAUTH_CALLBACK_PATH=/oauth/callback
 GYAZO_MCP_OAUTH_CLIENT_ID=your-client-id
 GYAZO_MCP_OAUTH_CLIENT_SECRET=your-client-secret
 GYAZO_MCP_PERSONAL_ACCESS_TOKEN=your-personal-access-token
 ```
 
-`GYAZO_MCP_OAUTH_CLIENT_ID` と `GYAZO_MCP_OAUTH_CLIENT_SECRET` を設定すると MCP login を利用できます。`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は簡易確認や個人利用向けの代替手段です。
+`tcp_port`、`oauth_callback_path`、`rust_log` は `config.toml` で管理し、`GYAZO_MCP_OAUTH_CLIENT_ID` と `GYAZO_MCP_OAUTH_CLIENT_SECRET` は `.env` で管理します。`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は簡易確認や個人利用向けの代替手段です。
 
 ## Gyazo OAuth Application
 
@@ -89,7 +97,7 @@ OAuth login を利用する場合は、Gyazo の開発者ページで OAuth Appl
 3. `redirect_uri` には `http://127.0.0.1:<port><callback_path>` を登録する
 4. 取得した値を `GYAZO_MCP_OAUTH_CLIENT_ID` と `GYAZO_MCP_OAUTH_CLIENT_SECRET` に設定する
 
-既定値では `redirect_uri` は `http://127.0.0.1:18449/oauth/callback` です。`GYAZO_MCP_TCP_PORT` または `GYAZO_MCP_OAUTH_CALLBACK_PATH` を変更する場合は、Gyazo 側に登録する `redirect_uri` も同じ値へ合わせてください。
+既定値では `redirect_uri` は `http://127.0.0.1:18449/oauth/callback` です。`config.toml` の `tcp_port` または `oauth_callback_path` を変更する場合は、Gyazo 側に登録する `redirect_uri` も同じ値へ合わせてください。
 
 まずローカルで動作確認したいだけであれば、Gyazo の開発者ページで発行できる Personal Access Token を `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` に設定して利用することもできます。ただし、PAT で取得できるのは原則としてそのトークンを発行したユーザーに紐づく画像のみで、他ユーザーがアップロードした public 画像を取得する用途には向きません。
 

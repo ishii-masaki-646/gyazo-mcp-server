@@ -27,8 +27,6 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
-use tracing_subscriber::EnvFilter;
-
 use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
@@ -274,17 +272,14 @@ async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig
 #[tokio::main]
 async fn main() -> Result<()> {
     load_env_files()?;
+    let runtime_config = RuntimeConfig::load()?;
 
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("gyazo_mcp_server=info,rmcp=info")),
-        )
+        .with_env_filter(runtime_config.tracing_env_filter())
         .with_writer(std::io::stderr)
         .init();
 
     let cli = Cli::parse();
-    let runtime_config = RuntimeConfig::from_env()?;
     let app_state = Arc::new(AppState::new(runtime_config.clone())?);
 
     match cli.command {
