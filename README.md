@@ -12,6 +12,8 @@ Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP 
 - MCP 標準 login に対応した OAuth broker
 - Gyazo の `list / get / latest / search / upload / delete / oEmbed` tools
 - `gyazo-mcp:///image_id` 形式の resources
+- `config` / `env` サブコマンドによる対話的な初期設定と設定管理
+- `service` サブコマンドによる OS サービスの常駐化 (Linux / macOS / Windows)
 
 ## Available Tools
 
@@ -208,6 +210,31 @@ gyazo-mcp-server stdio --auth
 - `http://127.0.0.1:<port><callback_path>` への callback を受け取れること
 
 完全な非対話環境では、OAuth の代わりに `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を利用する方が現実的です。ただし、PAT は OAuth login のようなユーザー認証文脈の権限を持たないため、利用できる操作やアクセス範囲は限定されます。
+
+## Service
+
+HTTP transport のサーバーを OS サービスとして常駐させることができます。
+
+```bash
+# サービスとして登録・起動
+gyazo-mcp-server service install
+
+# サービスの状態を確認
+gyazo-mcp-server service status
+
+# サービス登録を解除
+gyazo-mcp-server service uninstall
+```
+
+| OS | 登録先 |
+|----|--------|
+| Linux (systemd) | `~/.config/systemd/user/gyazo-mcp-server.service` |
+| macOS (launchd) | `~/Library/LaunchAgents/com.gyazo.mcp-server.plist` |
+| Windows | タスクスケジューラ (ログオン時に実行) |
+
+systemd が存在しない Linux 環境や BSD 等では、手動でサービス設定を行う必要があります。
+
+`--config-dir` で一時的に設定ディレクトリを変更した状態で `service install` を実行すると、常駐後のサービスが異なる設定を参照する可能性があるため、警告と確認が表示されます。常駐化する場合は、先に `config set config_dir` で永続化してください。
 
 ## Stdio Client Examples
 

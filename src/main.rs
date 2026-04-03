@@ -5,6 +5,7 @@ mod gyazo_api;
 mod mcp_oauth;
 mod runtime_config;
 mod server;
+mod service;
 mod tools;
 
 use std::{io, sync::Arc};
@@ -13,7 +14,10 @@ use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::config as auth_config;
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
-use crate::cli::{Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, StdioArgs};
+use crate::cli::{
+    Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, ServiceArgs, ServiceCommand,
+    StdioArgs,
+};
 use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
@@ -256,6 +260,14 @@ fn run_env_command(args: EnvArgs) -> Result<()> {
     }
 }
 
+fn run_service_command(args: ServiceArgs) -> Result<()> {
+    match args.command {
+        ServiceCommand::Install => service::install(),
+        ServiceCommand::Uninstall => service::uninstall(),
+        ServiceCommand::Status => service::status(),
+    }
+}
+
 async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
     let service_app_state = app_state.clone();
     let service: StreamableHttpService<GyazoServer, LocalSessionManager> =
@@ -342,12 +354,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    // config/env コマンドは設定ファイルの読み書きを自前で行うため、
+    // config/env/service コマンドは設定ファイルの読み書きを自前で行うため、
     // load_env_files() や RuntimeConfig::load() より前にディスパッチする。
     // これにより config.toml が壊れていても config set で復旧できる。
     match cli.command {
         Some(Command::Config(args)) => return run_config_command(args),
         Some(Command::Env(args)) => return run_env_command(args),
+        Some(Command::Service(args)) => return run_service_command(args),
         _ => {}
     }
 
@@ -365,7 +378,7 @@ async fn main() -> Result<()> {
             run_stdio_auth_flow(app_state, runtime_config).await?
         }
         Some(Command::Stdio(StdioArgs { auth: false })) => run_stdio_server(app_state).await?,
-        Some(Command::Config(_) | Command::Env(_)) => unreachable!(),
+        Some(Command::Config(_) | Command::Env(_) | Command::Service(_)) => unreachable!(),
         None => run_http_server(app_state, runtime_config).await?,
     }
 
