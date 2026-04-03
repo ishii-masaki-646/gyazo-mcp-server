@@ -9,10 +9,11 @@ mod tools;
 
 use std::{io, sync::Arc};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use axum::{
     Router,
     extract::{Query, State},
+    http::StatusCode,
     middleware,
     response::{IntoResponse, Redirect},
     routing::{get, post},
@@ -31,7 +32,7 @@ use tracing_subscriber::EnvFilter;
 use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, StdioArgs};
 use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
@@ -94,6 +95,34 @@ async fn root_handler() -> &'static str {
     "gyazo-mcp-server は起動中です"
 }
 
+struct DirectAuthState {
+    app_state: Arc<AppState>,
+    completion: Arc<tokio::sync::Notify>,
+    result: Arc<tokio::sync::Mutex<Option<Result<String, (StatusCode, String)>>>>,
+}
+
+async fn direct_oauth_callback_handler(
+    State(state): State<Arc<DirectAuthState>>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> impl IntoResponse {
+    let response = match oauth::complete_login(state.app_state.as_ref(), query).await {
+        Ok(message) => Ok(message),
+        Err(error) => Err(error.into_parts()),
+    };
+
+    let (status, message) = match &response {
+        Ok(message) => (StatusCode::OK, message.clone()),
+        Err((status, message)) => (*status, message.clone()),
+    };
+
+    let mut guard = state.result.lock().await;
+    *guard = Some(response);
+    drop(guard);
+    state.completion.notify_one();
+
+    (status, message)
+}
+
 async fn resolve_stdio_session(app_state: &AppState) -> Result<AuthorizedSession> {
     let backend_access_token = app_state.resolve_backend_access_token()?.ok_or_else(|| {
         anyhow!("stdio 起動には保存済み OAuth token か GYAZO_MCP_PERSONAL_ACCESS_TOKEN が必要です")
@@ -110,6 +139,56 @@ async fn resolve_stdio_session(app_state: &AppState) -> Result<AuthorizedSession
             },
         },
     })
+}
+
+async fn run_stdio_auth_flow(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
+    let authorize_url = oauth::begin_login(app_state.as_ref())?;
+    let completion = Arc::new(tokio::sync::Notify::new());
+    let result = Arc::new(tokio::sync::Mutex::new(None));
+    let auth_state = Arc::new(DirectAuthState {
+        app_state,
+        completion: completion.clone(),
+        result: result.clone(),
+    });
+
+    let app = Router::new()
+        .route(runtime_config.oauth_callback_path(), get(direct_oauth_callback_handler))
+        .route("/", get(root_handler))
+        .with_state(auth_state.clone());
+
+    let listener = tokio::net::TcpListener::bind(runtime_config.bind_address()).await?;
+    eprintln!("Gyazo OAuth 認証を開始するわ。ブラウザで次の URL を開いてね:");
+    eprintln!("{authorize_url}");
+    eprintln!(
+        "callback は {} で待ち受けるよ。完了したらこのコマンドは終了するわ。",
+        runtime_config.oauth_callback_url()
+    );
+
+    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+        completion.notified().await;
+    });
+    let server_task = tokio::spawn(server.into_future());
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            bail!("OAuth 認証を中断したわ");
+        }
+        _ = auth_state.completion.notified() => {}
+    }
+
+    server_task.await??;
+
+    let outcome = result.lock().await.take();
+    match outcome {
+        Some(Ok(message)) => {
+            eprintln!("{message}");
+            Ok(())
+        }
+        Some(Err((status, message))) => {
+            bail!("Gyazo OAuth 認証に失敗したわ (status {status}: {message})");
+        }
+        None => bail!("OAuth callback を受け取れなかったわ"),
+    }
 }
 
 async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
@@ -209,7 +288,10 @@ async fn main() -> Result<()> {
     let app_state = Arc::new(AppState::new(runtime_config.clone())?);
 
     match cli.command {
-        Some(Command::Stdio) => run_stdio_server(app_state).await?,
+        Some(Command::Stdio(StdioArgs { auth: true })) => {
+            run_stdio_auth_flow(app_state, runtime_config).await?
+        }
+        Some(Command::Stdio(StdioArgs { auth: false })) => run_stdio_server(app_state).await?,
         None => run_http_server(app_state, runtime_config).await?,
     }
 
