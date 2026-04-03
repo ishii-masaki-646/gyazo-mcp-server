@@ -1,4 +1,7 @@
-use std::{fs, net::{IpAddr, Ipv4Addr, SocketAddr}};
+use std::{
+    fs,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -44,8 +47,9 @@ impl RuntimeConfig {
             bail!("GYAZO_MCP_OAUTH_CALLBACK_PATH must start with '/'");
         }
         if let Some(rust_log) = &rust_log {
-            EnvFilter::try_new(rust_log)
-                .with_context(|| format!("RUST_LOG / rust_log を解釈できませんでした: {rust_log}"))?;
+            EnvFilter::try_new(rust_log).with_context(|| {
+                format!("RUST_LOG / rust_log を解釈できませんでした: {rust_log}")
+            })?;
         }
 
         Ok(Self {

@@ -9,6 +9,18 @@ mod tools;
 
 use std::{io, sync::Arc};
 
+use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
+use crate::auth::oauth::{self, OAuthCallbackQuery};
+use crate::auth::paths;
+use crate::cli::{Cli, Command, StdioArgs};
+use crate::gyazo_api::GyazoUserProfile;
+use crate::mcp_oauth::{
+    authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
+    protected_resource_metadata_handler, register_client_handler, require_mcp_bearer_token,
+    token_handler,
+};
+use crate::runtime_config::RuntimeConfig;
+use crate::server::GyazoServer;
 use anyhow::{Result, anyhow, bail};
 use axum::{
     Router,
@@ -27,18 +39,6 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
-use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
-use crate::auth::oauth::{self, OAuthCallbackQuery};
-use crate::auth::paths;
-use crate::cli::{Cli, Command, StdioArgs};
-use crate::gyazo_api::GyazoUserProfile;
-use crate::mcp_oauth::{
-    authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
-    protected_resource_metadata_handler, register_client_handler, require_mcp_bearer_token,
-    token_handler,
-};
-use crate::runtime_config::RuntimeConfig;
-use crate::server::GyazoServer;
 
 fn load_env_files() -> Result<()> {
     if let Some(path) = paths::env_file_path()
@@ -93,10 +93,44 @@ async fn root_handler() -> &'static str {
     "gyazo-mcp-server は起動中です"
 }
 
+type DirectAuthOutcome = Result<String, (StatusCode, String)>;
+
+fn direct_auth_response_parts(outcome: &DirectAuthOutcome) -> (StatusCode, String) {
+    match outcome {
+        Ok(message) => (StatusCode::OK, message.clone()),
+        Err((status, message)) => (*status, message.clone()),
+    }
+}
+
+fn finalize_stdio_auth_outcome(outcome: Option<DirectAuthOutcome>) -> Result<String> {
+    match outcome {
+        Some(Ok(message)) => Ok(message),
+        Some(Err((status, message))) => {
+            bail!("Gyazo OAuth 認証に失敗しました (status {status}: {message})");
+        }
+        None => bail!("OAuth callback を受信できませんでした"),
+    }
+}
+
 struct DirectAuthState {
     app_state: Arc<AppState>,
     completion: Arc<tokio::sync::Notify>,
-    result: Arc<tokio::sync::Mutex<Option<Result<String, (StatusCode, String)>>>>,
+    result: Arc<tokio::sync::Mutex<Option<DirectAuthOutcome>>>,
+}
+
+async fn complete_direct_auth(
+    completion: &tokio::sync::Notify,
+    result: &tokio::sync::Mutex<Option<DirectAuthOutcome>>,
+    response: DirectAuthOutcome,
+) -> (StatusCode, String) {
+    let response_parts = direct_auth_response_parts(&response);
+
+    let mut guard = result.lock().await;
+    *guard = Some(response);
+    drop(guard);
+    completion.notify_waiters();
+
+    response_parts
 }
 
 async fn direct_oauth_callback_handler(
@@ -108,17 +142,7 @@ async fn direct_oauth_callback_handler(
         Err(error) => Err(error.into_parts()),
     };
 
-    let (status, message) = match &response {
-        Ok(message) => (StatusCode::OK, message.clone()),
-        Err((status, message)) => (*status, message.clone()),
-    };
-
-    let mut guard = state.result.lock().await;
-    *guard = Some(response);
-    drop(guard);
-    state.completion.notify_one();
-
-    (status, message)
+    complete_direct_auth(state.completion.as_ref(), state.result.as_ref(), response).await
 }
 
 async fn resolve_stdio_session(app_state: &AppState) -> Result<AuthorizedSession> {
@@ -139,7 +163,10 @@ async fn resolve_stdio_session(app_state: &AppState) -> Result<AuthorizedSession
     })
 }
 
-async fn run_stdio_auth_flow(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
+async fn run_stdio_auth_flow(
+    app_state: Arc<AppState>,
+    runtime_config: RuntimeConfig,
+) -> Result<()> {
     let authorize_url = oauth::begin_login(app_state.as_ref())?;
     let completion = Arc::new(tokio::sync::Notify::new());
     let result = Arc::new(tokio::sync::Mutex::new(None));
@@ -150,15 +177,18 @@ async fn run_stdio_auth_flow(app_state: Arc<AppState>, runtime_config: RuntimeCo
     });
 
     let app = Router::new()
-        .route(runtime_config.oauth_callback_path(), get(direct_oauth_callback_handler))
+        .route(
+            runtime_config.oauth_callback_path(),
+            get(direct_oauth_callback_handler),
+        )
         .route("/", get(root_handler))
         .with_state(auth_state.clone());
 
     let listener = tokio::net::TcpListener::bind(runtime_config.bind_address()).await?;
-    eprintln!("Gyazo OAuth 認証を開始するわ。ブラウザで次の URL を開いてね:");
+    eprintln!("Gyazo OAuth 認証を開始します。ブラウザで次の URL を開いてください:");
     eprintln!("{authorize_url}");
     eprintln!(
-        "callback は {} で待ち受けるよ。完了したらこのコマンドは終了するわ。",
+        "callback は {} で待ち受けます。完了するとこのコマンドは終了します。",
         runtime_config.oauth_callback_url()
     );
 
@@ -169,24 +199,17 @@ async fn run_stdio_auth_flow(app_state: Arc<AppState>, runtime_config: RuntimeCo
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            bail!("OAuth 認証を中断したわ");
+            bail!("OAuth 認証を中断しました");
         }
         _ = auth_state.completion.notified() => {}
     }
 
     server_task.await??;
 
-    let outcome = result.lock().await.take();
-    match outcome {
-        Some(Ok(message)) => {
-            eprintln!("{message}");
-            Ok(())
-        }
-        Some(Err((status, message))) => {
-            bail!("Gyazo OAuth 認証に失敗したわ (status {status}: {message})");
-        }
-        None => bail!("OAuth callback を受け取れなかったわ"),
-    }
+    let message = finalize_stdio_auth_outcome(result.lock().await.take())?;
+    eprintln!("{message}");
+
+    Ok(())
 }
 
 async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
@@ -198,6 +221,82 @@ async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
     server.serve(stdio()).await?.waiting().await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use axum::http::StatusCode;
+    use tokio::time::timeout;
+
+    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
+
+    #[test]
+    fn direct_auth_response_parts_returns_ok_for_success() {
+        let response = direct_auth_response_parts(&Ok("done".to_string()));
+
+        assert_eq!(response, (StatusCode::OK, "done".to_string()));
+    }
+
+    #[test]
+    fn direct_auth_response_parts_preserves_failure_parts() {
+        let response =
+            direct_auth_response_parts(&Err((StatusCode::BAD_REQUEST, "bad request".to_string())));
+
+        assert_eq!(
+            response,
+            (StatusCode::BAD_REQUEST, "bad request".to_string())
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_success_message() {
+        let message = finalize_stdio_auth_outcome(Some(Ok("saved".to_string()))).unwrap();
+
+        assert_eq!(message, "saved");
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_failure_error() {
+        let error = finalize_stdio_auth_outcome(Some(Err((
+            StatusCode::BAD_GATEWAY,
+            "exchange failed".to_string(),
+        ))))
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Gyazo OAuth 認証に失敗しました (status 502 Bad Gateway: exchange failed)"
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_missing_callback_error() {
+        let error = finalize_stdio_auth_outcome(None).unwrap_err();
+
+        assert_eq!(error.to_string(), "OAuth callback を受信できませんでした");
+    }
+
+    #[tokio::test]
+    async fn complete_direct_auth_notifies_all_waiters_and_stores_result() {
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let result = tokio::sync::Mutex::new(None);
+
+        let waiter_one = completion.notified();
+        let waiter_two = completion.notified();
+
+        let response = complete_direct_auth(&completion, &result, Ok("saved".to_string())).await;
+
+        assert_eq!(response, (StatusCode::OK, "saved".to_string()));
+        assert_eq!(result.lock().await.as_ref(), Some(&Ok("saved".to_string())));
+        timeout(Duration::from_millis(100), waiter_one)
+            .await
+            .expect("1つ目の waiter が起きる必要があります");
+        timeout(Duration::from_millis(100), waiter_two)
+            .await
+            .expect("2つ目の waiter も起きる必要があります");
+    }
 }
 
 async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
