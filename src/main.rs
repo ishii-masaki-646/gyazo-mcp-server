@@ -12,7 +12,10 @@ use std::{io, sync::Arc};
 use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
-use crate::cli::{Cli, Command, StdioArgs};
+use crate::auth::config as auth_config;
+use crate::cli::{
+    Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, StdioArgs,
+};
 use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
@@ -223,79 +226,35 @@ async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use axum::http::StatusCode;
-    use tokio::time::timeout;
-
-    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
-
-    #[test]
-    fn direct_auth_response_parts_returns_ok_for_success() {
-        let response = direct_auth_response_parts(&Ok("done".to_string()));
-
-        assert_eq!(response, (StatusCode::OK, "done".to_string()));
+fn run_config_command(args: ConfigArgs) -> Result<()> {
+    match args.command {
+        ConfigCommand::Init => runtime_config::init_config(),
+        ConfigCommand::Show => runtime_config::show_config(),
+        ConfigCommand::Get(get_args) => runtime_config::get_config(&get_args.key),
+        ConfigCommand::Set(set_args) => runtime_config::set_config(&set_args.key, &set_args.value),
+        ConfigCommand::Unset(unset_args) => runtime_config::unset_config(&unset_args.key),
+        ConfigCommand::Path => {
+            let path = paths::config_file_path()
+                .ok_or_else(|| anyhow!("設定ディレクトリを特定できませんでした"))?;
+            println!("{}", path.display());
+            Ok(())
+        }
     }
+}
 
-    #[test]
-    fn direct_auth_response_parts_preserves_failure_parts() {
-        let response =
-            direct_auth_response_parts(&Err((StatusCode::BAD_REQUEST, "bad request".to_string())));
-
-        assert_eq!(
-            response,
-            (StatusCode::BAD_REQUEST, "bad request".to_string())
-        );
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_success_message() {
-        let message = finalize_stdio_auth_outcome(Some(Ok("saved".to_string()))).unwrap();
-
-        assert_eq!(message, "saved");
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_failure_error() {
-        let error = finalize_stdio_auth_outcome(Some(Err((
-            StatusCode::BAD_GATEWAY,
-            "exchange failed".to_string(),
-        ))))
-        .unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Gyazo OAuth 認証に失敗しました (status 502 Bad Gateway: exchange failed)"
-        );
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_missing_callback_error() {
-        let error = finalize_stdio_auth_outcome(None).unwrap_err();
-
-        assert_eq!(error.to_string(), "OAuth callback を受信できませんでした");
-    }
-
-    #[tokio::test]
-    async fn complete_direct_auth_notifies_all_waiters_and_stores_result() {
-        let completion = Arc::new(tokio::sync::Notify::new());
-        let result = tokio::sync::Mutex::new(None);
-
-        let waiter_one = completion.notified();
-        let waiter_two = completion.notified();
-
-        let response = complete_direct_auth(&completion, &result, Ok("saved".to_string())).await;
-
-        assert_eq!(response, (StatusCode::OK, "saved".to_string()));
-        assert_eq!(result.lock().await.as_ref(), Some(&Ok("saved".to_string())));
-        timeout(Duration::from_millis(100), waiter_one)
-            .await
-            .expect("1つ目の waiter が起きる必要があります");
-        timeout(Duration::from_millis(100), waiter_two)
-            .await
-            .expect("2つ目の waiter も起きる必要があります");
+fn run_env_command(args: EnvArgs) -> Result<()> {
+    match args.command {
+        EnvCommand::Init => auth_config::init_env(),
+        EnvCommand::Show => auth_config::show_env(),
+        EnvCommand::Get(get_args) => auth_config::get_env(&get_args.key),
+        EnvCommand::Set(set_args) => auth_config::set_env(&set_args.key, &set_args.value),
+        EnvCommand::Unset(unset_args) => auth_config::unset_env(&unset_args.key),
+        EnvCommand::Path => {
+            let path = paths::env_file_path()
+                .ok_or_else(|| anyhow!("設定ディレクトリを特定できませんでした"))?;
+            println!("{}", path.display());
+            Ok(())
+        }
     }
 }
 
@@ -370,6 +329,30 @@ async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    if let Some(dir) = &cli.config_dir {
+        paths::set_config_dir_override(std::path::PathBuf::from(dir));
+    } else {
+        // CLI override がなければ、デフォルト .env から GYAZO_MCP_CONFIG_DIR を
+        // 先読みして環境変数にセットする。load_env_files() より前に行うのは、
+        // load_env_files() 自体が paths::config_dir() → env_file_path() を
+        // 経由するため、先に config_dir を確定させておく必要があるため。
+        if let Some(dir) = auth_config::read_config_dir_from_default_env() {
+            // Safety: main の最初期でまだ他スレッドは起動していない
+            unsafe { std::env::set_var("GYAZO_MCP_CONFIG_DIR", &dir) };
+        }
+    }
+
+    // config/env コマンドは設定ファイルの読み書きを自前で行うため、
+    // load_env_files() や RuntimeConfig::load() より前にディスパッチする。
+    // これにより config.toml が壊れていても config set で復旧できる。
+    match cli.command {
+        Some(Command::Config(args)) => return run_config_command(args),
+        Some(Command::Env(args)) => return run_env_command(args),
+        _ => {}
+    }
+
     load_env_files()?;
     let runtime_config = RuntimeConfig::load()?;
 
@@ -377,8 +360,6 @@ async fn main() -> Result<()> {
         .with_env_filter(runtime_config.tracing_env_filter())
         .with_writer(std::io::stderr)
         .init();
-
-    let cli = Cli::parse();
     let app_state = Arc::new(AppState::new(runtime_config.clone())?);
 
     match cli.command {
@@ -386,8 +367,85 @@ async fn main() -> Result<()> {
             run_stdio_auth_flow(app_state, runtime_config).await?
         }
         Some(Command::Stdio(StdioArgs { auth: false })) => run_stdio_server(app_state).await?,
+        Some(Command::Config(_) | Command::Env(_)) => unreachable!(),
         None => run_http_server(app_state, runtime_config).await?,
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use axum::http::StatusCode;
+    use tokio::time::timeout;
+
+    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
+
+    #[test]
+    fn direct_auth_response_parts_returns_ok_for_success() {
+        let response = direct_auth_response_parts(&Ok("done".to_string()));
+
+        assert_eq!(response, (StatusCode::OK, "done".to_string()));
+    }
+
+    #[test]
+    fn direct_auth_response_parts_preserves_failure_parts() {
+        let response =
+            direct_auth_response_parts(&Err((StatusCode::BAD_REQUEST, "bad request".to_string())));
+
+        assert_eq!(
+            response,
+            (StatusCode::BAD_REQUEST, "bad request".to_string())
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_success_message() {
+        let message = finalize_stdio_auth_outcome(Some(Ok("saved".to_string()))).unwrap();
+
+        assert_eq!(message, "saved");
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_failure_error() {
+        let error = finalize_stdio_auth_outcome(Some(Err((
+            StatusCode::BAD_GATEWAY,
+            "exchange failed".to_string(),
+        ))))
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Gyazo OAuth 認証に失敗しました (status 502 Bad Gateway: exchange failed)"
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_missing_callback_error() {
+        let error = finalize_stdio_auth_outcome(None).unwrap_err();
+
+        assert_eq!(error.to_string(), "OAuth callback を受信できませんでした");
+    }
+
+    #[tokio::test]
+    async fn complete_direct_auth_notifies_all_waiters_and_stores_result() {
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let result = tokio::sync::Mutex::new(None);
+
+        let waiter_one = completion.notified();
+        let waiter_two = completion.notified();
+
+        let response = complete_direct_auth(&completion, &result, Ok("saved".to_string())).await;
+
+        assert_eq!(response, (StatusCode::OK, "saved".to_string()));
+        assert_eq!(result.lock().await.as_ref(), Some(&Ok("saved".to_string())));
+        timeout(Duration::from_millis(100), waiter_one)
+            .await
+            .expect("1つ目の waiter が起きる必要があります");
+        timeout(Duration::from_millis(100), waiter_two)
+            .await
+            .expect("2つ目の waiter も起きる必要があります");
+    }
 }
