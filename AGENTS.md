@@ -64,6 +64,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - `base_url` は `0.0.0.0` バインド時に `127.0.0.1` にフォールバックします。LAN 向けに公開する場合は `GYAZO_MCP_BASE_URL` で明示指定してください。
 - `docker-compose.yml` のボリュームマウントはホスト OS によってパスが異なります（Linux/macOS: `${HOME}/.config/...`、Windows: `${APPDATA}/...`）。
 - リリース時に GitHub Actions から ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) が自動 push されます。
+- `mcp-registry/` ディレクトリに Docker MCP Catalog への登録用メタデータ (`server.yaml` / `tools.json` / `readme.md`) を管理します。
 
 ## Transport 運用メモ
 - HTTP transport は `/mcp` endpoint を利用し、MCP login 対応 client からの利用を基本としてください。

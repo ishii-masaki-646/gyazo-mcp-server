@@ -8,6 +8,7 @@
 - `docker-compose.yml` を追加しました。
 - リリース CI で ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) を自動 push するようにしました。
 - CI に Docker ビルド・起動テストを追加しました。
+- Docker MCP Catalog への登録用メタデータ (`mcp-registry/`) を追加しました。
 
 ## 0.4.0 - 2026-04-04
 
