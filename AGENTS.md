@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## プロジェクト構成とモジュール整理
-このリポジトリは小規模な Rust のバイナリクレートです。`src/main.rs` は起動処理のみにとどめ、MCP サーバー本体は `src/server.rs`、ツール群は `src/tools/` 配下に分けてください。今後ツールを増やす場合も、`src/tools/basic.rs` のように責務ごとにファイルを分ける前提で進めてください。`Cargo.toml` はパッケージ定義と依存関係、`Cargo.lock` は依存バージョン固定、`config.toml` はローカル実行用の設定ファイルです。ビルド成果物は `target/` に出力されるため、追跡対象にはしないでください。
+このリポジトリは小規模な Rust のバイナリクレートです。`src/main.rs` は起動処理のみにとどめ、MCP サーバー本体は `src/server.rs`、ツール群は `src/tools/` 配下、設定管理は `src/runtime_config.rs` と `src/auth/`、OS サービス管理は `src/service.rs` に分けてください。今後ツールを増やす場合も、`src/tools/basic.rs` のように責務ごとにファイルを分ける前提で進めてください。`Cargo.toml` はパッケージ定義と依存関係、`Cargo.lock` は依存バージョン固定です。ビルド成果物は `target/` に出力されるため、追跡対象にはしないでください。
 
 ## ビルド・テスト・開発コマンド
 - `cargo run`: ローカルでビルドしてサーバーを起動する
@@ -49,7 +49,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 コミットメッセージは `Gyazo upload client を追加` のように日本語で、短く明確に記述してください。件名は 72 文字前後までに収め、1コミットごとにレビューしやすい単位へ分けてください。プルリクエストには変更概要、実行した確認コマンド（`cargo build`、`cargo test`、`cargo clippy` など）、設定やプロトコルに関する前提があればそれも記載してください。MCP の挙動を変える場合は、リクエストやレスポンスの例も添えると分かりやすくなります。
 
 ## 設定とセキュリティ
-`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないでください。.env 系ファイルはローカル専用として扱い、必要な場合は `.env.example` のみを共有してください。動作設定は `~/.config/gyazo-mcp-server/config.toml`、認証情報は `~/.config/gyazo-mcp-server/.env` に分けて扱ってください。`tcp_port`、`oauth_callback_path`、`rust_log` は `config.toml` を正とし、一時上書きが必要な場合だけ `GYAZO_MCP_TCP_PORT`、`GYAZO_MCP_OAUTH_CALLBACK_PATH`、`RUST_LOG` を使ってください。`GYAZO_MCP_OAUTH_CLIENT_ID`、`GYAZO_MCP_OAUTH_CLIENT_SECRET`、`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は `.env` で管理してください。設定例が必要な場合は、実値ではなくプレースホルダーを用い、必要なキーは PR か README に記載して共有してください。
+`config.toml` や `.env` に秘密情報、API トークン、端末固有の値をコミットしないでください。.env 系ファイルはローカル専用として扱い、必要な場合は `.env.example` のみを共有してください。設定ファイルはプラットフォームの標準ディレクトリ (`dirs::config_dir()` ベース) に配置されます。Linux は `~/.config/gyazo-mcp-server/`、macOS は `~/Library/Application Support/gyazo-mcp-server/`、Windows は `AppData\Roaming\gyazo-mcp-server\` です。動作設定は `config.toml`、認証情報は `.env` に分けて扱ってください。`tcp_port`、`oauth_callback_path`、`rust_log` は `config.toml` を正とし、一時上書きが必要な場合だけ `GYAZO_MCP_TCP_PORT`、`GYAZO_MCP_OAUTH_CALLBACK_PATH`、`RUST_LOG` を使ってください。`GYAZO_MCP_OAUTH_CLIENT_ID`、`GYAZO_MCP_OAUTH_CLIENT_SECRET`、`GYAZO_MCP_PERSONAL_ACCESS_TOKEN` は `.env` で管理してください。設定例が必要な場合は、実値ではなくプレースホルダーを用い、必要なキーは PR か README に記載して共有してください。
 
 ## 設定管理コマンド
 - `config` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) は `config.toml` と `config_dir` を管理します。
@@ -67,6 +67,8 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 ## サービス管理
 - `service install` / `uninstall` / `status` は OS ごとのサービス登録を管理します。
 - Linux は systemd user service、macOS は launchd LaunchAgent、Windows はタスクスケジューラを使用します。
-- systemd が存在しない Linux や BSD 等は検出失敗で手動案内にフォールバックします。
+- systemd の user manager が利用できない Linux や BSD 等は `systemctl --user daemon-reload` の失敗で検出し、手動案内にフォールバックします。
 - `service` コマンドも `config` / `env` と同様に `RuntimeConfig::load()` より前に早期ディスパッチされます。
+- `--config-dir` で一時 override した状態での `service install` は、永続化されていないか永続化値と不一致の場合に警告と確認を表示します。
 - `is_installed()` は `env init` 完了時のヒント表示に使用されます。サービス登録済みの場合はヒントを表示しません。
+- systemd unit ファイルのパスはダブルクォートで囲んでおり、空白を含むパスにも対応しています。

@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-04-04
 
 - `service` サブコマンド (`install` / `uninstall` / `status`) を追加しました。HTTP サーバーを OS サービスとして常駐させることができます。
   - Linux: systemd user service
   - macOS: launchd LaunchAgent
   - Windows: タスクスケジューラ (ログオン時に実行)
 - `env init` 完了時にサービスが未登録の場合、`service install` のヒントを表示するようにしました。
+- `--config-dir` が未永続化または永続化値と不一致の状態で `service install` を実行する場合、警告と確認を表示するようにしました。
+- Linux の systemd user manager の検出を `systemctl --user daemon-reload` に改善し、user manager が動作していない環境での誤登録を防止しました。
+- systemd unit ファイルのパスをダブルクォートで囲み、空白を含むパスに対応しました。
 
 ## 0.3.0 - 2026-04-03
 
