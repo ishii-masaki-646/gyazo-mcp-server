@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `config` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) を追加しました。
+- `env` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) を追加しました。
+- `config init` で対話形式の初期設定を追加しました。OAuth アプリケーション登録のガイド、コールバック URL のクリップボードコピー、ブラウザでの登録ページ表示を含みます。
+- `--config-dir` グローバルオプションと `config set config_dir` による設定ディレクトリの変更を追加しました。
+- 設定ディレクトリのパスを `dirs` クレートに切り替え、Linux / macOS / Windows のクロスプラットフォームに対応しました。
+- `env show` / `env get` でシークレット値を TTY ではマスク、パイプでは生値で出力するようにしました。
+- `config` / `env` コマンドを `RuntimeConfig::load()` より前にディスパッチし、壊れた設定ファイルでも復旧可能にしました。
+
 ## 0.2.0 - 2026-04-03
 
 - `stdio` transport を追加し、HTTP transport なしでも MCP client から利用できるようにしました。
