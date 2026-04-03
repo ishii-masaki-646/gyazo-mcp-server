@@ -38,6 +38,12 @@ brew tap ishii-masaki-646/tap
 brew install gyazo-mcp-server
 ```
 
+### winget (Windows)
+
+```powershell
+winget install ishiimasaki646.gyazo-mcp-server
+```
+
 ### Docker
 
 ```bash

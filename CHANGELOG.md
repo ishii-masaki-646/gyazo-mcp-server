@@ -11,6 +11,7 @@
 - Docker MCP Catalog への登録用メタデータ (`mcp-registry/`) を追加しました。
 - Homebrew tap (`brew tap ishii-masaki-646/tap`) を追加しました。macOS / Linux で `brew install gyazo-mcp-server` が利用可能です。
 - リリース CI で Homebrew formula のバージョンとチェックサムを自動更新するようにしました。
+- winget パッケージ manifest を追加しました。Windows で `winget install ishiimasaki646.gyazo-mcp-server` が利用可能です (microsoft/winget-pkgs への PR 承認後)。
 
 ## 0.4.0 - 2026-04-04
 

@@ -70,6 +70,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - **crates.io**: `cargo install gyazo-mcp-server` でインストール。`cargo publish` で公開。
 - **Docker Hub / ghcr.io**: リリース CI でマルチアーキイメージ (amd64 + arm64) を自動 push。
 - **Homebrew tap**: `ishii-masaki-646/homebrew-tap` リポジトリで formula を管理。リリース CI で formula のバージョンとチェックサムを自動更新。`HOMEBREW_TAP_TOKEN` (PAT) が必要。
+- **winget**: `winget/` ディレクトリに manifest を管理。microsoft/winget-pkgs に PR で登録。
 - **GitHub Releases**: タグ push 時にバイナリ (Linux / macOS / Windows) と CHANGELOG からのリリースノートを自動生成。
 - **Docker MCP Catalog**: `mcp-registry/` のメタデータを docker/mcp-registry に PR で登録。
 
