@@ -1,20 +1,18 @@
 use anyhow::Result;
-use axum::http::request::Parts;
 use rmcp::{
     ErrorData as McpError,
-    handler::server::common::Extension,
     handler::server::wrapper::Parameters,
     model::{CallToolResult, Content},
+    service::RequestContext,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    app_state::AuthorizedSession,
     gyazo_api::{
-        GyazoUploadImageRequest, delete_image, fetch_image_as_base64, get_image, get_latest_image,
-        get_oembed, list_images, search_images, upload_image,
+        GyazoUploadImageRequest, delete_image, fetch_authenticated_user, fetch_image_as_base64,
+        get_image, get_latest_image, get_oembed, list_images, search_images, upload_image,
     },
     server::GyazoServer,
 };
@@ -60,9 +58,14 @@ struct GyazoUploadImageArgs {
 #[rmcp::tool_router(router = gyazo_tool_router, vis = "pub(crate)")]
 impl GyazoServer {
     #[rmcp::tool(description = "現在の MCP access token に紐づく Gyazo ユーザーを表示します")]
-    fn gyazo_whoami(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
-        let user = session.record.gyazo_user;
+    async fn gyazo_whoami(
+        &self,
+        request_context: RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = self.authorized_session_for_request(&request_context)?;
+        let user = fetch_authenticated_user(&session.record.backend_access_token)
+            .await
+            .map_err(internal_error)?;
 
         json_result(json!({
             "uid": user.uid,
@@ -75,10 +78,10 @@ impl GyazoServer {
     #[rmcp::tool(description = "現在の Gyazo ユーザーがアップロードしたキャプチャを全文検索します")]
     async fn gyazo_search(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(GyazoSearchArgs { query, page, per }): Parameters<GyazoSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let images = search_images(&session.record.backend_access_token, &query, page, per)
             .await
             .map_err(internal_error)?;
@@ -89,10 +92,10 @@ impl GyazoServer {
     #[rmcp::tool(description = "認証済みユーザーの Gyazo 画像一覧を取得します")]
     async fn gyazo_list_images(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(GyazoListImagesArgs { page, per_page }): Parameters<GyazoListImagesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let images = list_images(&session.record.backend_access_token, page, per_page)
             .await
             .map_err(internal_error)?;
@@ -103,10 +106,10 @@ impl GyazoServer {
     #[rmcp::tool(description = "画像 ID または Gyazo URL を指定して 1 件の画像を取得します")]
     async fn gyazo_get_image(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoGetImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let image_ref = select_image_ref(args)?;
         let image = get_image(&session.record.backend_access_token, &image_ref)
             .await
@@ -118,10 +121,10 @@ impl GyazoServer {
     #[rmcp::tool(description = "画像 ID または Gyazo URL を指定して 1 件の画像を削除します")]
     async fn gyazo_delete_image(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoGetImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let image_ref = select_image_ref(args)?;
         let deleted = delete_image(&session.record.backend_access_token, &image_ref)
             .await
@@ -133,9 +136,9 @@ impl GyazoServer {
     #[rmcp::tool(description = "最新の Gyazo 画像を画像本体とメタデータ付きで取得します")]
     async fn gyazo_get_latest_image(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let image = get_latest_image(&session.record.backend_access_token)
             .await
             .map_err(internal_error)?;
@@ -152,10 +155,10 @@ impl GyazoServer {
     #[rmcp::tool(description = "base64 画像を Gyazo にアップロードします")]
     async fn gyazo_upload_image(
         &self,
-        Extension(parts): Extension<Parts>,
+        request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoUploadImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = authorized_session(&parts)?;
+        let session = self.authorized_session_for_request(&request_context)?;
         let uploaded = upload_image(
             &session.record.backend_access_token,
             GyazoUploadImageRequest {
@@ -185,19 +188,6 @@ impl GyazoServer {
 
         json_result(oembed)
     }
-}
-
-fn authorized_session(parts: &Parts) -> Result<AuthorizedSession, McpError> {
-    parts
-        .extensions
-        .get::<AuthorizedSession>()
-        .cloned()
-        .ok_or_else(|| {
-            McpError::invalid_params(
-                "request context に authorized session が含まれていません",
-                None,
-            )
-        })
 }
 
 fn select_image_ref(args: GyazoGetImageArgs) -> Result<String, McpError> {
