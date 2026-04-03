@@ -11,7 +11,15 @@
 - `cargo fmt`: Rust 標準フォーマットを適用する
 - `cargo clippy --all-targets --all-features`: レビュー前に lint を確認する
 
-コードを更新したら、少なくとも `cargo build` でバイナリ生成が通ることを確認してください。プルリクエスト前は `cargo fmt`、`cargo build`、`cargo clippy --all-targets --all-features` を通してください。
+コードを更新したら、少なくとも `cargo build` でバイナリ生成が通ることを確認してください。コミット前は GitHub Actions の CI と同じチェックを手元で通してください。
+
+```bash
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --check
+```
+
+`cargo fmt --check` で差分が出た場合は `cargo fmt` で整形してからコミットしてください。
 
 ## コーディング規約と命名
 Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってください。インデントは 4 スペースとし、関数は小さく保ち、読みやすさに有効な場面では型を明示してください。命名は Rust の慣例に合わせてください。
@@ -35,6 +43,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - MCP OAuth (`mcp_oauth.rs`): PKCE 検証、リダイレクト URI 構築
 - 設定管理 (`auth/config.rs`): .env パース、シークレットマスク、`GYAZO_MCP_CONFIG_DIR` の排除ガード
 - パス解決 (`auth/paths.rs`): デフォルトパスのフォールバック、派生パスの整合性
+- サービス管理 (`service.rs`): バイナリ検出、サービス定義の内容検証、`is_installed` の安全性
 
 ## コミットとプルリクエスト
 コミットメッセージは `Gyazo upload client を追加` のように日本語で、短く明確に記述してください。件名は 72 文字前後までに収め、1コミットごとにレビューしやすい単位へ分けてください。プルリクエストには変更概要、実行した確認コマンド（`cargo build`、`cargo test`、`cargo clippy` など）、設定やプロトコルに関する前提があればそれも記載してください。MCP の挙動を変える場合は、リクエストやレスポンスの例も添えると分かりやすくなります。
@@ -54,3 +63,10 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - MCP login 非対応 client 向けの認証準備は `gyazo-mcp-server stdio --auth` を案内してください。
 - `stdio --auth` は一時的なローカル callback サーバーとブラウザ認可を必要とするため、その前提も README に明記してください。
 - client 設定例を追加する場合は、少なくとも TOML 形式 1 例と JSON 形式 1 例を維持してください。
+
+## サービス管理
+- `service install` / `uninstall` / `status` は OS ごとのサービス登録を管理します。
+- Linux は systemd user service、macOS は launchd LaunchAgent、Windows はタスクスケジューラを使用します。
+- systemd が存在しない Linux や BSD 等は検出失敗で手動案内にフォールバックします。
+- `service` コマンドも `config` / `env` と同様に `RuntimeConfig::load()` より前に早期ディスパッチされます。
+- `is_installed()` は `env init` 完了時のヒント表示に使用されます。サービス登録済みの場合はヒントを表示しません。

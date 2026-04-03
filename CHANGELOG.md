@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `service` サブコマンド (`install` / `uninstall` / `status`) を追加しました。HTTP サーバーを OS サービスとして常駐させることができます。
+  - Linux: systemd user service
+  - macOS: launchd LaunchAgent
+  - Windows: タスクスケジューラ (ログオン時に実行)
+- `env init` 完了時にサービスが未登録の場合、`service install` のヒントを表示するようにしました。
+
 ## 0.3.0 - 2026-04-03
 
 - `config` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) を追加しました。

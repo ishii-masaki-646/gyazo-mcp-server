@@ -23,6 +23,8 @@ pub(crate) enum Command {
     Config(ConfigArgs),
     /// .env の環境変数を表示・変更します
     Env(EnvArgs),
+    /// HTTP サーバーの OS サービス登録を管理します
+    Service(ServiceArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -114,6 +116,22 @@ pub(crate) struct EnvSetArgs {
     pub(crate) key: String,
     /// 値
     pub(crate) value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub(crate) struct ServiceArgs {
+    #[command(subcommand)]
+    pub(crate) command: ServiceCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub(crate) enum ServiceCommand {
+    /// OS のサービスとして登録し、ログイン時に自動起動するようにします
+    Install,
+    /// サービス登録を解除します
+    Uninstall,
+    /// サービスの状態を表示します
+    Status,
 }
 
 #[cfg(test)]
@@ -333,6 +351,42 @@ mod tests {
             cli.command,
             Some(Command::Env(EnvArgs {
                 command: EnvCommand::Path,
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_service_install() {
+        let cli = Cli::parse_from(["gyazo-mcp-server", "service", "install"]);
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Service(ServiceArgs {
+                command: ServiceCommand::Install,
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_service_uninstall() {
+        let cli = Cli::parse_from(["gyazo-mcp-server", "service", "uninstall"]);
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Service(ServiceArgs {
+                command: ServiceCommand::Uninstall,
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_service_status() {
+        let cli = Cli::parse_from(["gyazo-mcp-server", "service", "status"]);
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Service(ServiceArgs {
+                command: ServiceCommand::Status,
             }))
         );
     }

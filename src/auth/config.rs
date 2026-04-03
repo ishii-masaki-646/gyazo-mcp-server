@@ -224,6 +224,13 @@ pub(crate) fn init_env() -> Result<()> {
     }
 
     println!("\n.env の初期設定が完了しました");
+
+    if !crate::service::is_installed() {
+        println!();
+        println!("[オプション] HTTP サーバーをバックグラウンドで常駐させたい場合は、");
+        println!("OS サービスとして登録できます:");
+        println!("  gyazo-mcp-server service install");
+    }
     Ok(())
 }
 

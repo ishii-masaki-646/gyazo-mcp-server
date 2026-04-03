@@ -209,6 +209,29 @@ gyazo-mcp-server stdio --auth
 
 完全な非対話環境では、OAuth の代わりに `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を利用する方が現実的です。ただし、PAT は OAuth login のようなユーザー認証文脈の権限を持たないため、利用できる操作やアクセス範囲は限定されます。
 
+## Service
+
+HTTP transport のサーバーを OS サービスとして常駐させることができます。
+
+```bash
+# サービスとして登録・起動
+gyazo-mcp-server service install
+
+# サービスの状態を確認
+gyazo-mcp-server service status
+
+# サービス登録を解除
+gyazo-mcp-server service uninstall
+```
+
+| OS | 登録先 |
+|----|--------|
+| Linux (systemd) | `~/.config/systemd/user/gyazo-mcp-server.service` |
+| macOS (launchd) | `~/Library/LaunchAgents/com.gyazo.mcp-server.plist` |
+| Windows | タスクスケジューラ (ログオン時に実行) |
+
+systemd が存在しない Linux 環境や BSD 等では、手動でサービス設定を行う必要があります。
+
 ## Stdio Client Examples
 
 ### Codex CLI
