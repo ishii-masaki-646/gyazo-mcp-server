@@ -39,3 +39,17 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --check
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t gyazo-mcp-server:ci-test .
+      - name: Verify container starts
+        run: |
+          docker run --rm -d --name ci-test -p 127.0.0.1:18449:18449 gyazo-mcp-server:ci-test
+          sleep 2
+          curl -sf http://127.0.0.1:18449/ || (docker logs ci-test && exit 1)
+          docker stop ci-test

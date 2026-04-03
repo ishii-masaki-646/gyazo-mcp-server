@@ -6,6 +6,8 @@
 - `bind_address` 設定を追加しました (`config.toml` / `GYAZO_MCP_BIND_ADDRESS`)。
 - `base_url` 設定を追加しました (`config.toml` / `GYAZO_MCP_BASE_URL`)。OAuth metadata 等でクライアントに返す URL を明示指定できます。
 - `docker-compose.yml` を追加しました。
+- リリース CI で ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) を自動 push するようにしました。
+- CI に Docker ビルド・起動テストを追加しました。
 
 ## 0.4.0 - 2026-04-04
 
