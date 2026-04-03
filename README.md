@@ -14,6 +14,7 @@ Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP 
 - `gyazo-mcp:///image_id` 形式の resources
 - `config` / `env` サブコマンドによる対話的な初期設定と設定管理
 - `service` サブコマンドによる OS サービスの常駐化 (Linux / macOS / Windows)
+- Docker イメージによるコンテナ実行 (コンテナ内で自動的に `0.0.0.0` にバインド)
 
 ## Available Tools
 
@@ -27,6 +28,19 @@ Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP 
 - `gyazo_get_oembed_metadata`
 
 ## Install
+
+### Docker
+
+```bash
+docker run -d \
+  -p 127.0.0.1:18449:18449 \
+  -e GYAZO_MCP_PERSONAL_ACCESS_TOKEN=your-token \
+  ishiimasaki646/gyazo-mcp-server
+```
+
+Docker Compose を使用する場合は、リポジトリの `docker-compose.yml` を参照してください。
+
+### cargo install
 
 crates.io からインストールする場合は、次のコマンドを使用します。
 
@@ -84,9 +98,13 @@ target/release/gyazo-mcp-server
 
 ```toml
 tcp_port = 18449
+bind_address = "127.0.0.1"
+base_url = "http://127.0.0.1:18449"
 oauth_callback_path = "/oauth/callback"
 rust_log = "gyazo_mcp_server=info,rmcp=info"
 ```
+
+`bind_address` はコンテナ内では自動的に `0.0.0.0` になります。`base_url` は OAuth metadata 等でクライアントに返す URL で、未指定時は `bind_address` から自動導出されます（`0.0.0.0` の場合は `127.0.0.1` にフォールバック）。LAN 向けに公開する場合は明示的に指定してください。
 
 `.env`:
 

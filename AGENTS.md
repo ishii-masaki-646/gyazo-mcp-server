@@ -44,6 +44,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - 設定管理 (`auth/config.rs`): .env パース、シークレットマスク、`GYAZO_MCP_CONFIG_DIR` の排除ガード
 - パス解決 (`auth/paths.rs`): デフォルトパスのフォールバック、派生パスの整合性
 - サービス管理 (`service.rs`): バイナリ検出、サービス定義の内容検証、`is_installed` の安全性
+- Docker / コンテナ (`runtime_config.rs`): コンテナ検出、`bind_address` / `base_url` のフォールバック
 
 ## コミットとプルリクエスト
 コミットメッセージは `Gyazo upload client を追加` のように日本語で、短く明確に記述してください。件名は 72 文字前後までに収め、1コミットごとにレビューしやすい単位へ分けてください。プルリクエストには変更概要、実行した確認コマンド（`cargo build`、`cargo test`、`cargo clippy` など）、設定やプロトコルに関する前提があればそれも記載してください。MCP の挙動を変える場合は、リクエストやレスポンスの例も添えると分かりやすくなります。
@@ -56,6 +57,12 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - `env` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) は `.env` を管理します。
 - `config_dir` の永続化は `config set config_dir` で行い、常にデフォルト位置の `.env` に書き出します。`env set GYAZO_MCP_CONFIG_DIR` は受け付けません。
 - `config` / `env` コマンドは `RuntimeConfig::load()` より前にディスパッチされるため、`config.toml` が壊れていても `config set` で復旧できます。
+
+## Docker 運用メモ
+- `Dockerfile` はマルチステージビルド (`rust:1-bookworm` → `debian:bookworm-slim`)。glibc バージョンを揃えるためビルダーとランタイムを同じ Debian リリースにしてください。
+- コンテナ内では `/.dockerenv` の存在検出により `bind_address` が自動的に `0.0.0.0` になります。
+- `base_url` は `0.0.0.0` バインド時に `127.0.0.1` にフォールバックします。LAN 向けに公開する場合は `GYAZO_MCP_BASE_URL` で明示指定してください。
+- `docker-compose.yml` のボリュームマウントはホスト OS によってパスが異なります（Linux/macOS: `${HOME}/.config/...`、Windows: `${APPDATA}/...`）。
 
 ## Transport 運用メモ
 - HTTP transport は `/mcp` endpoint を利用し、MCP login 対応 client からの利用を基本としてください。

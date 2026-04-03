@@ -1,0 +1,17 @@
+services:
+  gyazo-mcp-server:
+    build: .
+    ports:
+      # ホスト側は 127.0.0.1 に制限して外部に晒さない
+      - "127.0.0.1:18449:18449"
+    environment:
+      - GYAZO_MCP_PERSONAL_ACCESS_TOKEN=${GYAZO_MCP_PERSONAL_ACCESS_TOKEN:-}
+    volumes:
+      # ホスト側で取得済みの OAuth token や設定を共有する
+      # Linux / macOS / WSL2:
+      - ${HOME}/.config/gyazo-mcp-server/token.toml:/root/.config/gyazo-mcp-server/token.toml:ro
+      - ${HOME}/.config/gyazo-mcp-server/.env:/root/.config/gyazo-mcp-server/.env:ro
+      # Windows (PowerShell) の場合は上の 2 行を以下に置き換える:
+      # - ${APPDATA}/gyazo-mcp-server/token.toml:/root/.config/gyazo-mcp-server/token.toml:ro
+      # - ${APPDATA}/gyazo-mcp-server/.env:/root/.config/gyazo-mcp-server/.env:ro
+    restart: unless-stopped
