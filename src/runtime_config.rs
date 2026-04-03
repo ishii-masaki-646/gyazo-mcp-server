@@ -412,10 +412,7 @@ pub(crate) fn init_config() -> Result<()> {
     let name_line = "  Name ............. 好きな名前でOK (おすすめ: \"Gyazo MCP Server\")";
     let url_line = format!("  Callback URL ..... {callback_url}");
     println!();
-    print_box(
-        " 登録フォームの入力について ",
-        &[name_line, &url_line],
-    );
+    print_box(" 登録フォームの入力について ", &[name_line, &url_line]);
     println!();
 
     if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -433,10 +430,9 @@ pub(crate) fn init_config() -> Result<()> {
         }
     }
 
-    let open_browser =
-        Confirm::new("OAuth アプリケーション登録ページをブラウザで開きますか？")
-            .with_default(true)
-            .prompt()?;
+    let open_browser = Confirm::new("OAuth アプリケーション登録ページをブラウザで開きますか？")
+        .with_default(true)
+        .prompt()?;
     if open_browser {
         open::that(gyazo_new_app_url)
             .map_err(|e| anyhow::anyhow!("ブラウザを開けませんでした: {e}"))?;
@@ -600,7 +596,11 @@ fn copy_config_files(
             println!("  スキップ (既に存在): {}", dst.display());
         } else {
             fs::copy(&src, &dst).with_context(|| {
-                format!("コピーに失敗しました: {} → {}", src.display(), dst.display())
+                format!(
+                    "コピーに失敗しました: {} → {}",
+                    src.display(),
+                    dst.display()
+                )
             })?;
             println!("  コピー: {} → {}", src.display(), dst.display());
         }
@@ -609,10 +609,7 @@ fn copy_config_files(
     Ok(())
 }
 
-fn offer_copy_config_files(
-    old_dir: &std::path::Path,
-    new_dir: &std::path::Path,
-) -> Result<()> {
+fn offer_copy_config_files(old_dir: &std::path::Path, new_dir: &std::path::Path) -> Result<()> {
     let existing = find_copyable_files(old_dir);
 
     if existing.is_empty() {
@@ -703,16 +700,17 @@ fn set_config_at(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
 
     let toml_value = match key {
         "tcp_port" => {
-            let port: u16 = value
-                .parse()
-                .with_context(|| format!("tcp_port は 0-65535 の整数で指定してください: {value}"))?;
+            let port: u16 = value.parse().with_context(|| {
+                format!("tcp_port は 0-65535 の整数で指定してください: {value}")
+            })?;
             toml::Value::Integer(port.into())
         }
         _ => toml::Value::String(value.to_string()),
     };
     file_config.insert(key.to_string(), toml_value);
 
-    let raw = toml::to_string(&file_config).context("config.toml をシリアライズできませんでした")?;
+    let raw =
+        toml::to_string(&file_config).context("config.toml をシリアライズできませんでした")?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -845,10 +843,8 @@ mod tests {
         set_config_at(&path_a, "tcp_port", "19000").unwrap();
         set_config_at(&path_b, "tcp_port", "20000").unwrap();
 
-        let table_a: toml::Table =
-            toml::from_str(&fs::read_to_string(&path_a).unwrap()).unwrap();
-        let table_b: toml::Table =
-            toml::from_str(&fs::read_to_string(&path_b).unwrap()).unwrap();
+        let table_a: toml::Table = toml::from_str(&fs::read_to_string(&path_a).unwrap()).unwrap();
+        let table_b: toml::Table = toml::from_str(&fs::read_to_string(&path_b).unwrap()).unwrap();
         assert_eq!(table_a.get("tcp_port").unwrap().as_integer(), Some(19000));
         assert_eq!(table_b.get("tcp_port").unwrap().as_integer(), Some(20000));
 

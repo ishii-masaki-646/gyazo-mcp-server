@@ -68,7 +68,10 @@ mod tests {
         if let Some(base) = config_dir() {
             assert_eq!(env_file_path(), Some(base.join(".env")));
             assert_eq!(token_file_path(), Some(base.join("token.toml")));
-            assert_eq!(mcp_session_file_path(), Some(base.join("mcp_sessions.toml")));
+            assert_eq!(
+                mcp_session_file_path(),
+                Some(base.join("mcp_sessions.toml"))
+            );
             assert_eq!(config_file_path(), Some(base.join("config.toml")));
         }
     }

@@ -10,12 +10,10 @@ mod tools;
 use std::{io, sync::Arc};
 
 use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
+use crate::auth::config as auth_config;
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
-use crate::auth::config as auth_config;
-use crate::cli::{
-    Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, StdioArgs,
-};
+use crate::cli::{Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, StdioArgs};
 use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,

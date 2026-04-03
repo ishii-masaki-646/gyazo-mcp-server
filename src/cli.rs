@@ -132,7 +132,13 @@ mod tests {
 
     #[test]
     fn parses_global_config_dir_option() {
-        let cli = Cli::parse_from(["gyazo-mcp-server", "--config-dir", "/tmp/test", "config", "show"]);
+        let cli = Cli::parse_from([
+            "gyazo-mcp-server",
+            "--config-dir",
+            "/tmp/test",
+            "config",
+            "show",
+        ]);
 
         assert_eq!(cli.config_dir, Some("/tmp/test".to_string()));
         assert_eq!(
