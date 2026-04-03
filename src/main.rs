@@ -411,8 +411,9 @@ async fn main() -> Result<()> {
         paths::set_config_dir_override(std::path::PathBuf::from(dir));
     } else {
         // CLI override がなければ、デフォルト .env から GYAZO_MCP_CONFIG_DIR を
-        // 先読みして環境変数にセットする。これにより fresh process でも
-        // 永続化された custom config_dir を解決できる。
+        // 先読みして環境変数にセットする。load_env_files() より前に行うのは、
+        // load_env_files() 自体が paths::config_dir() → env_file_path() を
+        // 経由するため、先に config_dir を確定させておく必要があるため。
         if let Some(dir) = auth_config::read_config_dir_from_default_env() {
             // Safety: main の最初期でまだ他スレッドは起動していない
             unsafe { std::env::set_var("GYAZO_MCP_CONFIG_DIR", &dir) };

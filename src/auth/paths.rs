@@ -12,6 +12,9 @@ pub(crate) fn has_config_dir_override() -> bool {
     CONFIG_DIR_OVERRIDE.get().is_some()
 }
 
+/// 現在のプロセスが使う設定ディレクトリを返す。
+/// 起動時に一度解決された値がプロセス終了まで使われる想定。
+/// 優先順位: --config-dir (CLI) > GYAZO_MCP_CONFIG_DIR (env) > dirs::config_dir()
 pub(crate) fn config_dir() -> Option<PathBuf> {
     if let Some(override_dir) = CONFIG_DIR_OVERRIDE.get() {
         return Some(override_dir.clone());

@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::IsTerminal,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
@@ -359,18 +360,30 @@ pub(crate) fn init_config() -> Result<()> {
     )?;
 
     // 既定値と異なる場合のみ書き込む
-    // config_dir は .env に書くので、変更時は先に保存して以降の書き込み先を切り替える
-    if config_dir != current_config_dir {
+    // config_dir が変更された場合、デフォルト .env に永続化し、
+    // 後続のキーは新しいディレクトリの config.toml に書く。
+    // paths::config_dir() は起動時のスナップショットなので process 内では変わらない。
+    // そのため config_dir 変更時は書き込み先を明示的に新ディレクトリにする。
+    let config_dir_changed = config_dir != current_config_dir;
+    if config_dir_changed {
         set_config("config_dir", &config_dir)?;
     }
+
+    let target_config_path = if config_dir_changed {
+        std::path::PathBuf::from(&config_dir).join("config.toml")
+    } else {
+        paths::config_file_path()
+            .ok_or_else(|| anyhow::anyhow!("設定ディレクトリを特定できませんでした"))?
+    };
+
     if port != current_port {
-        set_config("tcp_port", &port)?;
+        set_config_at(&target_config_path, "tcp_port", &port)?;
     }
     if callback != current_callback {
-        set_config("oauth_callback_path", &callback)?;
+        set_config_at(&target_config_path, "oauth_callback_path", &callback)?;
     }
     if log != current_log {
-        set_config("rust_log", &log)?;
+        set_config_at(&target_config_path, "rust_log", &log)?;
     }
 
     let callback_url = format!("http://127.0.0.1:{port}{callback}");
@@ -537,7 +550,96 @@ fn set_config_dir_in_default_env(value: &str) -> Result<()> {
 
     println!("GYAZO_MCP_CONFIG_DIR = \"{value}\" をデフォルトの .env に保存しました");
     println!("  (保存先: {})", path.display());
+
+    // 旧ディレクトリにファイルがあれば、新ディレクトリへのコピーを提案
+    let new_dir = std::path::PathBuf::from(value);
+    if let Some(old_dir) = old_config_dir_before_change()
+        && old_dir != new_dir
+        && old_dir.exists()
+    {
+        offer_copy_config_files(&old_dir, &new_dir)?;
+    }
+
     Ok(())
+}
+
+/// 変更前の config_dir を返す。CLI override があればそちら、
+/// なければデフォルト位置を返す。
+fn old_config_dir_before_change() -> Option<std::path::PathBuf> {
+    // set_config_dir_in_default_env が呼ばれた時点では、
+    // paths::config_dir() はまだ変更前の値を返す
+    // (環境変数は .env 書き込みだけで process env は変わらないため)
+    paths::config_dir()
+}
+
+const COPYABLE_FILES: &[&str] = &["config.toml", "token.toml", "mcp_sessions.toml"];
+
+/// 旧ディレクトリからコピー対象のファイルを検出する。
+fn find_copyable_files<'a>(old_dir: &std::path::Path) -> Vec<&'a str> {
+    COPYABLE_FILES
+        .iter()
+        .filter(|f| old_dir.join(f).exists())
+        .copied()
+        .collect()
+}
+
+/// ファイルを旧ディレクトリから新ディレクトリにコピーする。
+/// 新ディレクトリに同名ファイルが既にある場合はスキップする。
+fn copy_config_files(
+    old_dir: &std::path::Path,
+    new_dir: &std::path::Path,
+    files: &[&str],
+) -> Result<()> {
+    fs::create_dir_all(new_dir)
+        .with_context(|| format!("ディレクトリを作成できませんでした: {}", new_dir.display()))?;
+
+    for file in files {
+        let src = old_dir.join(file);
+        let dst = new_dir.join(file);
+        if dst.exists() {
+            println!("  スキップ (既に存在): {}", dst.display());
+        } else {
+            fs::copy(&src, &dst).with_context(|| {
+                format!("コピーに失敗しました: {} → {}", src.display(), dst.display())
+            })?;
+            println!("  コピー: {} → {}", src.display(), dst.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn offer_copy_config_files(
+    old_dir: &std::path::Path,
+    new_dir: &std::path::Path,
+) -> Result<()> {
+    let existing = find_copyable_files(old_dir);
+
+    if existing.is_empty() {
+        return Ok(());
+    }
+
+    println!();
+    println!("旧ディレクトリにファイルが見つかりました:");
+    for file in &existing {
+        println!("  {}", old_dir.join(file).display());
+    }
+
+    // 非対話環境（パイプや CI）では Confirm が入力待ちでハングするためスキップ
+    if !std::io::stdout().is_terminal() {
+        println!("非対話環境のため、手動でコピーしてください。");
+        return Ok(());
+    }
+
+    let copy = Confirm::new("新しいディレクトリにコピーしますか？")
+        .with_default(true)
+        .prompt()?;
+
+    if !copy {
+        return Ok(());
+    }
+
+    copy_config_files(old_dir, new_dir, &existing)
 }
 
 fn unset_config_dir_in_default_env() -> Result<()> {
@@ -576,24 +678,22 @@ fn unset_config_dir_in_default_env() -> Result<()> {
 }
 
 pub(crate) fn set_config(key: &str, value: &str) -> Result<()> {
-    if !VALID_CONFIG_KEYS.contains(&key) {
-        bail!(
-            "不明な設定キー: {key}\n有効なキー: {}",
-            VALID_CONFIG_KEYS.join(", ")
-        );
-    }
+    validate_config_key(key)?;
 
-    // config_dir は常にデフォルト位置の .env に保存する。
-    // 変更先の .env に書くと次回起動時にたどり着けなくなるため。
     if key == "config_dir" {
         return set_config_dir_in_default_env(value);
     }
 
     let path = paths::config_file_path()
         .ok_or_else(|| anyhow::anyhow!("設定ディレクトリを特定できませんでした"))?;
+    set_config_at(&path, key, value)
+}
 
+/// 指定した config.toml パスにキーを書き込む。
+/// init_config で config_dir 変更後に新ディレクトリへ書くために使う。
+fn set_config_at(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
     let mut file_config = if path.exists() {
-        let contents = fs::read_to_string(&path)
+        let contents = fs::read_to_string(path)
             .with_context(|| format!("config.toml を読み取れませんでした: {}", path.display()))?;
         toml::from_str::<toml::Table>(&contents)
             .with_context(|| format!("config.toml を解析できませんでした: {}", path.display()))?
@@ -623,9 +723,158 @@ pub(crate) fn set_config(key: &str, value: &str) -> Result<()> {
         })?;
     }
 
-    fs::write(&path, raw)
+    fs::write(path, raw)
         .with_context(|| format!("config.toml に書き込めませんでした: {}", path.display()))?;
 
     println!("{key} = \"{value}\" を config.toml に保存しました");
     Ok(())
+}
+
+fn validate_config_key(key: &str) -> Result<()> {
+    if !VALID_CONFIG_KEYS.contains(&key) {
+        bail!(
+            "不明な設定キー: {key}\n有効なキー: {}",
+            VALID_CONFIG_KEYS.join(", ")
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gyazo-mcp-{name}-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn find_copyable_files_detects_existing_files() {
+        let dir = temp_dir("find");
+        fs::write(dir.join("config.toml"), "x").unwrap();
+        fs::write(dir.join("token.toml"), "y").unwrap();
+
+        let found = find_copyable_files(&dir);
+
+        assert_eq!(found, vec!["config.toml", "token.toml"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_copyable_files_returns_empty_for_no_files() {
+        let dir = temp_dir("find-empty");
+
+        let found = find_copyable_files(&dir);
+
+        assert!(found.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_config_files_copies_to_new_dir() {
+        let old = temp_dir("copy-old");
+        let new = temp_dir("copy-new");
+        fs::write(old.join("config.toml"), "port = 18449").unwrap();
+        fs::write(old.join("token.toml"), "access_token = \"test\"").unwrap();
+
+        copy_config_files(&old, &new, &["config.toml", "token.toml"]).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(new.join("config.toml")).unwrap(),
+            "port = 18449"
+        );
+        assert_eq!(
+            fs::read_to_string(new.join("token.toml")).unwrap(),
+            "access_token = \"test\""
+        );
+
+        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&new);
+    }
+
+    #[test]
+    fn copy_config_files_skips_existing_in_destination() {
+        let old = temp_dir("copy-skip-old");
+        let new = temp_dir("copy-skip-new");
+        fs::write(old.join("config.toml"), "old content").unwrap();
+        fs::write(new.join("config.toml"), "new content").unwrap();
+
+        copy_config_files(&old, &new, &["config.toml"]).unwrap();
+
+        // 既存ファイルは上書きされない
+        assert_eq!(
+            fs::read_to_string(new.join("config.toml")).unwrap(),
+            "new content"
+        );
+
+        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&new);
+    }
+
+    #[test]
+    fn set_config_at_writes_to_specified_path() {
+        let dir = temp_dir("set-at");
+        let path = dir.join("config.toml");
+
+        set_config_at(&path, "tcp_port", "19000").unwrap();
+
+        let contents = fs::read_to_string(&path).unwrap();
+        let table: toml::Table = toml::from_str(&contents).unwrap();
+        assert_eq!(table.get("tcp_port").unwrap().as_integer(), Some(19000));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_config_at_does_not_affect_other_path() {
+        let dir_a = temp_dir("set-at-a");
+        let dir_b = temp_dir("set-at-b");
+        let path_a = dir_a.join("config.toml");
+        let path_b = dir_b.join("config.toml");
+
+        set_config_at(&path_a, "tcp_port", "19000").unwrap();
+        set_config_at(&path_b, "tcp_port", "20000").unwrap();
+
+        let table_a: toml::Table =
+            toml::from_str(&fs::read_to_string(&path_a).unwrap()).unwrap();
+        let table_b: toml::Table =
+            toml::from_str(&fs::read_to_string(&path_b).unwrap()).unwrap();
+        assert_eq!(table_a.get("tcp_port").unwrap().as_integer(), Some(19000));
+        assert_eq!(table_b.get("tcp_port").unwrap().as_integer(), Some(20000));
+
+        let _ = fs::remove_dir_all(&dir_a);
+        let _ = fs::remove_dir_all(&dir_b);
+    }
+
+    #[test]
+    fn set_config_at_creates_parent_directories() {
+        let base = temp_dir("set-at-nested");
+        let nested = base.join("deep").join("nested");
+        let path = nested.join("config.toml");
+
+        set_config_at(&path, "rust_log", "debug").unwrap();
+
+        assert!(path.exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn copyable_files_does_not_include_dot_env() {
+        // .env はデフォルト位置に固定のため、コピー対象に含めてはならない
+        assert!(
+            !COPYABLE_FILES.contains(&".env"),
+            ".env は COPYABLE_FILES に含めてはならない"
+        );
+    }
 }

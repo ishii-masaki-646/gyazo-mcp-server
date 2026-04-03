@@ -241,8 +241,9 @@ pub(crate) fn read_config_dir_from_default_env() -> Option<String> {
 }
 
 /// デフォルトの設定ディレクトリ (dirs::config_dir()) の .env パスを返す。
-/// config_dir の永続化先として使う。config_dir の値で .env の場所が変わると
-/// 次回起動時にたどり着けなくなるため、常にデフォルト位置に書く。
+/// config_dir の永続化先として使う。paths::config_dir() ではなく
+/// dirs::config_dir() を直接参照するのは、config_dir 自体の保存先を
+/// config_dir で決めると鶏と卵の循環になるため。
 pub(crate) fn default_env_file_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("gyazo-mcp-server").join(".env"))
 }
