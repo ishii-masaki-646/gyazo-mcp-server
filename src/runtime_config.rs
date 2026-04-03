@@ -227,16 +227,11 @@ const VALID_CONFIG_KEYS: &[&str] = &["config_dir", "tcp_port", "oauth_callback_p
 pub(crate) fn show_config() -> Result<()> {
     let file_config = load_runtime_config_file()?;
 
-    // config_dir は デフォルト位置の .env から読み取る
-    let config_dir_from_env = read_config_dir_from_default_env();
     let config_dir_resolved = paths::config_dir()
         .map(|d| d.display().to_string())
         .unwrap_or_else(|| "(unknown)".to_string());
-    if config_dir_from_env.is_some() {
-        println!("config_dir = \"{config_dir_resolved}\" (.env)");
-    } else {
-        println!("config_dir = \"{config_dir_resolved}\" (default)");
-    }
+    let config_dir_source = resolve_config_dir_source();
+    println!("config_dir = \"{config_dir_resolved}\" ({config_dir_source})");
 
     let entries = [
         (
@@ -489,15 +484,16 @@ pub(crate) fn unset_config(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn read_config_dir_from_default_env() -> Option<String> {
-    let path = crate::auth::config::default_env_file_path()?;
-    let contents = fs::read_to_string(path).ok()?;
-    contents
-        .lines()
-        .find(|line| line.trim_start().starts_with("GYAZO_MCP_CONFIG_DIR="))
-        .and_then(|line| line.split_once('='))
-        .map(|(_, v)| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+/// config_dir の出所を優先順位に従って判定する。
+/// --config-dir > .env (デフォルト位置) > default (dirs::config_dir())
+fn resolve_config_dir_source() -> &'static str {
+    if paths::has_config_dir_override() {
+        "--config-dir"
+    } else if crate::auth::config::read_config_dir_from_default_env().is_some() {
+        ".env"
+    } else {
+        "default"
+    }
 }
 
 fn set_config_dir_in_default_env(value: &str) -> Result<()> {

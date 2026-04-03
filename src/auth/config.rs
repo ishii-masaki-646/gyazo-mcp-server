@@ -50,7 +50,6 @@ fn read_env(key: &str) -> Option<String> {
 }
 
 const VALID_ENV_KEYS: &[&str] = &[
-    "GYAZO_MCP_CONFIG_DIR",
     "GYAZO_MCP_OAUTH_CLIENT_ID",
     "GYAZO_MCP_OAUTH_CLIENT_SECRET",
     "GYAZO_MCP_PERSONAL_ACCESS_TOKEN",
@@ -228,6 +227,19 @@ pub(crate) fn init_env() -> Result<()> {
     Ok(())
 }
 
+/// デフォルト位置の .env から GYAZO_MCP_CONFIG_DIR を読み取る。
+/// fresh process の bootstrap 用。load_env_files() より前に呼ぶ。
+pub(crate) fn read_config_dir_from_default_env() -> Option<String> {
+    let path = default_env_file_path()?;
+    let contents = std::fs::read_to_string(path).ok()?;
+    contents
+        .lines()
+        .find(|line| line.trim_start().starts_with("GYAZO_MCP_CONFIG_DIR="))
+        .and_then(|line| line.split_once('='))
+        .map(|(_, v)| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 /// デフォルトの設定ディレクトリ (dirs::config_dir()) の .env パスを返す。
 /// config_dir の永続化先として使う。config_dir の値で .env の場所が変わると
 /// 次回起動時にたどり着けなくなるため、常にデフォルト位置に書く。
@@ -354,6 +366,51 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("gyazo-mcp-env-test-{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir.join(".env")
+    }
+
+    #[test]
+    fn config_dir_is_not_a_valid_env_key() {
+        // GYAZO_MCP_CONFIG_DIR は env コマンドではなく config set config_dir で管理する。
+        // env set 経由だと bootstrap を迂回して custom .env に書いてしまうため。
+        assert!(
+            !VALID_ENV_KEYS.contains(&"GYAZO_MCP_CONFIG_DIR"),
+            "GYAZO_MCP_CONFIG_DIR は VALID_ENV_KEYS に含めてはならない"
+        );
+    }
+
+    #[test]
+    fn set_env_rejects_config_dir() {
+        let result = set_env("GYAZO_MCP_CONFIG_DIR", "/tmp/test");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unset_env_rejects_config_dir() {
+        let result = unset_env("GYAZO_MCP_CONFIG_DIR");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_env_rejects_config_dir() {
+        let result = get_env("GYAZO_MCP_CONFIG_DIR");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_env_entries_extracts_config_dir() {
+        let path = temp_env_path();
+        fs::write(&path, "GYAZO_MCP_CONFIG_DIR=/custom/path\nOTHER=value\n").unwrap();
+
+        let entries = load_env_entries(&path).unwrap();
+        let config_dir = entries
+            .iter()
+            .find(|(k, _)| k == "GYAZO_MCP_CONFIG_DIR")
+            .map(|(_, v)| v.as_str());
+
+        assert_eq!(config_dir, Some("/custom/path"));
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(path.parent().unwrap());
     }
 
     #[test]
