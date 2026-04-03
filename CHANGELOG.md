@@ -9,6 +9,8 @@
 - リリース CI で ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) を自動 push するようにしました。
 - CI に Docker ビルド・起動テストを追加しました。
 - Docker MCP Catalog への登録用メタデータ (`mcp-registry/`) を追加しました。
+- Homebrew tap (`brew tap ishii-masaki-646/tap`) を追加しました。macOS / Linux で `brew install gyazo-mcp-server` が利用可能です。
+- リリース CI で Homebrew formula のバージョンとチェックサムを自動更新するようにしました。
 
 ## 0.4.0 - 2026-04-04
 

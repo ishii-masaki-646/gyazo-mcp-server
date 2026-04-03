@@ -2,6 +2,8 @@
 
 [![crates.io](https://img.shields.io/crates/v/gyazo-mcp-server.svg)](https://crates.io/crates/gyazo-mcp-server)
 [![docs.rs](https://img.shields.io/docsrs/gyazo-mcp-server)](https://docs.rs/gyazo-mcp-server)
+[![Docker Hub](https://img.shields.io/docker/v/ishiimasaki646/gyazo-mcp-server?label=docker)](https://hub.docker.com/r/ishiimasaki646/gyazo-mcp-server)
+[![Homebrew](https://img.shields.io/badge/homebrew-tap-orange)](https://github.com/ishii-masaki-646/homebrew-tap)
 [![license](https://img.shields.io/crates/l/gyazo-mcp-server.svg)](https://github.com/ishii-masaki-646/gyazo-mcp-server)
 
 Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP transport と、MCP 標準 login に準拠した認証 broker、さらに stdio transport を備えています。
@@ -28,6 +30,13 @@ Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP 
 - `gyazo_get_oembed_metadata`
 
 ## Install
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap ishii-masaki-646/tap
+brew install gyazo-mcp-server
+```
 
 ### Docker
 

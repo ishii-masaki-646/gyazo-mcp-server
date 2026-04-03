@@ -66,6 +66,13 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - リリース時に GitHub Actions から ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) が自動 push されます。
 - `mcp-registry/` ディレクトリに Docker MCP Catalog への登録用メタデータ (`server.yaml` / `tools.json` / `readme.md`) を管理します。
 
+## 配信チャネル
+- **crates.io**: `cargo install gyazo-mcp-server` でインストール。`cargo publish` で公開。
+- **Docker Hub / ghcr.io**: リリース CI でマルチアーキイメージ (amd64 + arm64) を自動 push。
+- **Homebrew tap**: `ishii-masaki-646/homebrew-tap` リポジトリで formula を管理。リリース CI で formula のバージョンとチェックサムを自動更新。`HOMEBREW_TAP_TOKEN` (PAT) が必要。
+- **GitHub Releases**: タグ push 時にバイナリ (Linux / macOS / Windows) と CHANGELOG からのリリースノートを自動生成。
+- **Docker MCP Catalog**: `mcp-registry/` のメタデータを docker/mcp-registry に PR で登録。
+
 ## Transport 運用メモ
 - HTTP transport は `/mcp` endpoint を利用し、MCP login 対応 client からの利用を基本としてください。
 - stdio transport は `gyazo-mcp-server stdio` で起動してください。
