@@ -15,6 +15,8 @@ use crate::auth::paths;
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RuntimeConfigFile {
     tcp_port: Option<u16>,
+    bind_address: Option<String>,
+    base_url: Option<String>,
     oauth_callback_path: Option<String>,
     rust_log: Option<String>,
 }
@@ -22,6 +24,8 @@ struct RuntimeConfigFile {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
     tcp_port: u16,
+    bind_ip: IpAddr,
+    base_url: Option<String>,
     oauth_callback_path: String,
     rust_log: Option<String>,
 }
@@ -36,6 +40,21 @@ impl RuntimeConfig {
             .transpose()?
             .or(file_config.tcp_port)
             .unwrap_or(18449);
+        let bind_ip = std::env::var("GYAZO_MCP_BIND_ADDRESS")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or(file_config.bind_address)
+            .map(|value| {
+                value
+                    .parse::<IpAddr>()
+                    .with_context(|| format!("bind_address を解釈できませんでした: {value}"))
+            })
+            .transpose()?
+            .unwrap_or_else(default_bind_ip);
+        let base_url = std::env::var("GYAZO_MCP_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or(file_config.base_url);
         let oauth_callback_path = std::env::var("GYAZO_MCP_OAUTH_CALLBACK_PATH")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -57,6 +76,8 @@ impl RuntimeConfig {
 
         Ok(Self {
             tcp_port,
+            bind_ip,
+            base_url,
             oauth_callback_path,
             rust_log,
         })
@@ -70,11 +91,21 @@ impl RuntimeConfig {
     }
 
     pub(crate) fn bind_address(&self) -> SocketAddr {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), self.tcp_port)
+        SocketAddr::new(self.bind_ip, self.tcp_port)
     }
 
     pub(crate) fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.tcp_port)
+        if let Some(url) = &self.base_url {
+            return url.trim_end_matches('/').to_string();
+        }
+        // 0.0.0.0 は URL としては使えないため 127.0.0.1 にフォールバック。
+        // LAN 向けなど別の URL が必要な場合は base_url / GYAZO_MCP_BASE_URL で指定する。
+        let host = if self.bind_ip == IpAddr::V4(Ipv4Addr::UNSPECIFIED) {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        } else {
+            self.bind_ip
+        };
+        format!("http://{}:{}", host, self.tcp_port)
     }
 
     pub(crate) fn mcp_path(&self) -> &'static str {
@@ -162,6 +193,22 @@ impl RuntimeConfig {
     }
 }
 
+/// コンテナ環境かどうかを検出する。
+/// /.dockerenv の存在で Docker コンテナを判定する。
+fn is_container() -> bool {
+    std::path::Path::new("/.dockerenv").exists()
+}
+
+/// コンテナ内なら 0.0.0.0（外部からアクセス可能）、
+/// それ以外なら 127.0.0.1（ローカルに閉じる）をデフォルトにする。
+fn default_bind_ip() -> IpAddr {
+    if is_container() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    }
+}
+
 fn load_runtime_config_file() -> Result<RuntimeConfigFile> {
     let Some(path) = paths::config_file_path() else {
         return Ok(RuntimeConfigFile::default());
@@ -223,7 +270,14 @@ fn prompt_with_default(key: &str, default: &str, description: &str) -> Result<St
     })
 }
 
-const VALID_CONFIG_KEYS: &[&str] = &["config_dir", "tcp_port", "oauth_callback_path", "rust_log"];
+const VALID_CONFIG_KEYS: &[&str] = &[
+    "config_dir",
+    "tcp_port",
+    "bind_address",
+    "base_url",
+    "oauth_callback_path",
+    "rust_log",
+];
 
 pub(crate) fn show_config() -> Result<()> {
     let file_config = load_runtime_config_file()?;
@@ -234,12 +288,29 @@ pub(crate) fn show_config() -> Result<()> {
     let config_dir_source = resolve_config_dir_source();
     println!("config_dir = \"{config_dir_resolved}\" ({config_dir_source})");
 
+    let default_ip = default_bind_ip().to_string();
     let entries = [
         (
             "tcp_port",
             file_config.tcp_port.map(|v| v.to_string()),
             std::env::var("GYAZO_MCP_TCP_PORT").ok(),
             "18449".to_string(),
+        ),
+        (
+            "bind_address",
+            file_config.bind_address.clone(),
+            std::env::var("GYAZO_MCP_BIND_ADDRESS")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            default_ip,
+        ),
+        (
+            "base_url",
+            file_config.base_url.clone(),
+            std::env::var("GYAZO_MCP_BASE_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "(auto)".to_string(),
         ),
         (
             "oauth_callback_path",
@@ -294,6 +365,16 @@ pub(crate) fn get_config(key: &str) -> Result<()> {
             .ok()
             .or_else(|| file_config.tcp_port.map(|v| v.to_string()))
             .unwrap_or_else(|| "18449".to_string()),
+        "bind_address" => std::env::var("GYAZO_MCP_BIND_ADDRESS")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or(file_config.bind_address)
+            .unwrap_or_else(|| default_bind_ip().to_string()),
+        "base_url" => std::env::var("GYAZO_MCP_BASE_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or(file_config.base_url)
+            .unwrap_or_else(|| "(auto)".to_string()),
         "oauth_callback_path" => std::env::var("GYAZO_MCP_OAUTH_CALLBACK_PATH")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -872,5 +953,81 @@ mod tests {
             !COPYABLE_FILES.contains(&".env"),
             ".env は COPYABLE_FILES に含めてはならない"
         );
+    }
+
+    #[test]
+    fn default_bind_ip_returns_localhost_outside_container() {
+        // テスト環境はコンテナ外なので 127.0.0.1 が返る
+        // (CI の Docker コンテナ内では 0.0.0.0 が返りうるため値のアサートは条件付き)
+        let ip = default_bind_ip();
+        if !is_container() {
+            assert_eq!(ip, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        }
+    }
+
+    #[test]
+    fn is_container_returns_bool_without_panic() {
+        let _result: bool = is_container();
+    }
+
+    #[test]
+    fn bind_address_is_a_valid_config_key() {
+        assert!(VALID_CONFIG_KEYS.contains(&"bind_address"));
+    }
+
+    #[test]
+    fn base_url_is_a_valid_config_key() {
+        assert!(VALID_CONFIG_KEYS.contains(&"base_url"));
+    }
+
+    /// テスト用に RuntimeConfig を直接構築するヘルパー
+    fn make_config(bind_ip: IpAddr, base_url: Option<&str>, tcp_port: u16) -> RuntimeConfig {
+        RuntimeConfig {
+            tcp_port,
+            bind_ip,
+            base_url: base_url.map(|s| s.to_string()),
+            oauth_callback_path: "/oauth/callback".to_string(),
+            rust_log: None,
+        }
+    }
+
+    #[test]
+    fn base_url_uses_localhost_when_bind_is_unspecified() {
+        // 0.0.0.0 バインド時、URL としては 127.0.0.1 にフォールバックする
+        let config = make_config(IpAddr::V4(Ipv4Addr::UNSPECIFIED), None, 18449);
+        assert_eq!(config.base_url(), "http://127.0.0.1:18449");
+    }
+
+    #[test]
+    fn base_url_uses_bind_ip_when_not_unspecified() {
+        let config = make_config(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), None, 18449);
+        assert_eq!(config.base_url(), "http://192.168.1.100:18449");
+    }
+
+    #[test]
+    fn base_url_uses_localhost_by_default() {
+        let config = make_config(IpAddr::V4(Ipv4Addr::LOCALHOST), None, 18449);
+        assert_eq!(config.base_url(), "http://127.0.0.1:18449");
+    }
+
+    #[test]
+    fn base_url_explicit_overrides_bind_ip() {
+        // base_url が明示指定されていれば bind_ip に関係なくそちらを使う
+        let config = make_config(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            Some("https://mcp.example.com"),
+            18449,
+        );
+        assert_eq!(config.base_url(), "https://mcp.example.com");
+    }
+
+    #[test]
+    fn base_url_explicit_strips_trailing_slash() {
+        let config = make_config(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            Some("http://localhost:18449/"),
+            18449,
+        );
+        assert_eq!(config.base_url(), "http://localhost:18449");
     }
 }

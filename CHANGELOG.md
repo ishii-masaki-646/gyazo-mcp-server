@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 - 2026-04-04
+
+- Docker イメージを追加しました。コンテナ内では `/.dockerenv` 検出により自動的に `0.0.0.0` にバインドします。
+- `bind_address` 設定を追加しました (`config.toml` / `GYAZO_MCP_BIND_ADDRESS`)。
+- `base_url` 設定を追加しました (`config.toml` / `GYAZO_MCP_BASE_URL`)。OAuth metadata 等でクライアントに返す URL を明示指定できます。
+- `docker-compose.yml` を追加しました。
+- リリース CI で ghcr.io と Docker Hub にマルチアーキイメージ (amd64 + arm64) を自動 push するようにしました。
+- CI に Docker ビルド・起動テストを追加しました。
+- Docker MCP Catalog への登録用メタデータ (`mcp-registry/`) を追加しました。
+
 ## 0.4.0 - 2026-04-04
 
 - `service` サブコマンド (`install` / `uninstall` / `status`) を追加しました。HTTP サーバーを OS サービスとして常駐させることができます。
