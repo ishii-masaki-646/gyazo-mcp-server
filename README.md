@@ -77,6 +77,47 @@ cargo install --path .
 cargo uninstall gyazo-mcp-server
 ```
 
+## Quick Start
+
+インストール後、以下の手順で初期設定からサーバー起動まで行えます。
+
+### 1. 基本設定と OAuth アプリケーション登録
+
+```bash
+gyazo-mcp-server config init
+```
+
+ポート番号などの基本設定を対話形式で行います。完了後、Gyazo の OAuth アプリケーション登録ページへのガイドが表示されます。
+
+### 2. クレデンシャルの設定
+
+```bash
+gyazo-mcp-server env init
+```
+
+OAuth アプリケーション登録で取得した Client ID と Client Secret を設定します。
+
+### 3. サーバーの起動
+
+```bash
+# HTTP transport で起動
+gyazo-mcp-server
+
+# または OS サービスとして常駐させる
+gyazo-mcp-server service install
+```
+
+MCP endpoint は既定で `http://127.0.0.1:18449/mcp` です。ポートを変更した場合は `gyazo-mcp-server config get tcp_port` で確認してください。
+
+### 簡易確認 (PAT)
+
+OAuth の設定を省略して手早く試したい場合は、[Gyazo 開発者ページ](https://gyazo.com/api) で Personal Access Token を発行し、以下のように起動できます。
+
+```bash
+gyazo-mcp-server env set GYAZO_MCP_PERSONAL_ACCESS_TOKEN your-token
+gyazo-mcp-server
+```
+
 ## Build
 
 開発ビルド:
