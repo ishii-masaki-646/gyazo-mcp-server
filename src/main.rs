@@ -1,5 +1,6 @@
 mod app_state;
 mod auth;
+mod cli;
 mod gyazo_api;
 mod mcp_oauth;
 mod runtime_config;
@@ -8,7 +9,7 @@ mod tools;
 
 use std::{io, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use axum::{
     Router,
     extract::{Query, State},
@@ -16,16 +17,22 @@ use axum::{
     response::{IntoResponse, Redirect},
     routing::{get, post},
 };
+use clap::Parser;
 use dotenvy::{dotenv, from_path};
-use rmcp::transport::{
-    StreamableHttpServerConfig, StreamableHttpService,
-    streamable_http_server::session::local::LocalSessionManager,
+use rmcp::{
+    ServiceExt,
+    transport::{
+        StreamableHttpServerConfig, StreamableHttpService, stdio,
+        streamable_http_server::session::local::LocalSessionManager,
+    },
 };
 use tracing_subscriber::EnvFilter;
 
-use crate::app_state::AppState;
+use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
+use crate::cli::{Cli, Command};
+use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
     protected_resource_metadata_handler, register_client_handler, require_mcp_bearer_token,
@@ -87,20 +94,36 @@ async fn root_handler() -> &'static str {
     "gyazo-mcp-server は起動中です"
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    load_env_files()?;
+async fn resolve_stdio_session(app_state: &AppState) -> Result<AuthorizedSession> {
+    let backend_access_token = app_state.resolve_backend_access_token()?.ok_or_else(|| {
+        anyhow!("stdio 起動には保存済み OAuth token か GYAZO_MCP_PERSONAL_ACCESS_TOKEN が必要です")
+    })?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("gyazo_mcp_server=info,rmcp=info")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    Ok(AuthorizedSession {
+        record: AccessTokenRecord {
+            backend_access_token,
+            gyazo_user: GyazoUserProfile {
+                email: String::new(),
+                name: String::new(),
+                profile_image: String::new(),
+                uid: String::new(),
+            },
+        },
+    })
+}
 
-    let runtime_config = RuntimeConfig::from_env()?;
-    let app_state = Arc::new(AppState::new(runtime_config.clone())?);
+async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
+    let authorized_session = resolve_stdio_session(app_state.as_ref()).await?;
+    let server = GyazoServer::with_fallback_authorized_session(app_state, authorized_session)?;
+
+    tracing::info!("Gyazo MCP stdio サーバーを起動します");
+
+    server.serve(stdio()).await?.waiting().await?;
+
+    Ok(())
+}
+
+async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
     let service_app_state = app_state.clone();
     let service: StreamableHttpService<GyazoServer, LocalSessionManager> =
         StreamableHttpService::new(
@@ -165,6 +188,30 @@ async fn main() -> Result<()> {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    load_env_files()?;
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("gyazo_mcp_server=info,rmcp=info")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
+    let cli = Cli::parse();
+    let runtime_config = RuntimeConfig::from_env()?;
+    let app_state = Arc::new(AppState::new(runtime_config.clone())?);
+
+    match cli.command {
+        Some(Command::Stdio) => run_stdio_server(app_state).await?,
+        None => run_http_server(app_state, runtime_config).await?,
+    }
 
     Ok(())
 }

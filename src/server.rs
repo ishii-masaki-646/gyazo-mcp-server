@@ -26,14 +26,41 @@ use crate::{
 pub(crate) struct GyazoServer {
     pub(crate) app_state: Arc<AppState>,
     pub(crate) tool_router: ToolRouter<Self>,
+    fallback_authorized_session: Option<AuthorizedSession>,
 }
 
 impl GyazoServer {
     pub(crate) fn new(app_state: Arc<AppState>) -> Result<Self> {
+        Self::build(app_state, None)
+    }
+
+    pub(crate) fn with_fallback_authorized_session(
+        app_state: Arc<AppState>,
+        authorized_session: AuthorizedSession,
+    ) -> Result<Self> {
+        Self::build(app_state, Some(authorized_session))
+    }
+
+    fn build(
+        app_state: Arc<AppState>,
+        fallback_authorized_session: Option<AuthorizedSession>,
+    ) -> Result<Self> {
         Ok(Self {
             app_state,
             tool_router: Self::gyazo_tool_router(),
+            fallback_authorized_session,
         })
+    }
+
+    pub(crate) fn authorized_session_for_request(
+        &self,
+        context: &RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<AuthorizedSession, rmcp::ErrorData> {
+        authorized_session_from_context(
+            &self.app_state,
+            context,
+            self.fallback_authorized_session.as_ref(),
+        )
     }
 }
 
@@ -75,7 +102,7 @@ impl ServerHandler for GyazoServer {
         _request: Option<PaginatedRequestParam>,
         context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<ListResourcesResult, rmcp::ErrorData> {
-        let session = authorized_session_from_context(&self.app_state, &context)?;
+        let session = self.authorized_session_for_request(&context)?;
         let listed = list_images(&session.record.backend_access_token, Some(1), Some(20))
             .await
             .map_err(internal_error)?;
@@ -110,7 +137,7 @@ impl ServerHandler for GyazoServer {
         request: ReadResourceRequestParam,
         context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<ReadResourceResult, rmcp::ErrorData> {
-        let session = authorized_session_from_context(&self.app_state, &context)?;
+        let session = self.authorized_session_for_request(&context)?;
         let image_id = extract_image_id_from_resource_uri(&request.uri).map_err(internal_error)?;
         let image = get_image(&session.record.backend_access_token, &image_id)
             .await
@@ -149,13 +176,24 @@ impl ServerHandler for GyazoServer {
 fn authorized_session_from_context(
     app_state: &AppState,
     context: &RequestContext<rmcp::service::RoleServer>,
+    fallback_authorized_session: Option<&AuthorizedSession>,
 ) -> Result<AuthorizedSession, rmcp::ErrorData> {
-    let parts = context.extensions.get::<Parts>().ok_or_else(|| {
-        rmcp::ErrorData::invalid_params("request context に request parts が含まれていません", None)
-    })?;
+    if let Some(session) = context.extensions.get::<AuthorizedSession>().cloned() {
+        return Ok(session);
+    }
+
+    let Some(parts) = context.extensions.get::<Parts>() else {
+        return fallback_authorized_session.cloned().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(
+                "request context に request parts が含まれていません",
+                None,
+            )
+        });
+    };
 
     authorized_session_from_parts(app_state, parts)
         .map_err(internal_error)?
+        .or_else(|| fallback_authorized_session.cloned())
         .ok_or_else(|| {
             rmcp::ErrorData::invalid_params(
                 "request context に authorized session が含まれていません",

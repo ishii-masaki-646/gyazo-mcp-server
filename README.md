@@ -4,11 +4,11 @@
 [![docs.rs](https://img.shields.io/docsrs/gyazo-mcp-server)](https://docs.rs/gyazo-mcp-server)
 [![license](https://img.shields.io/crates/l/gyazo-mcp-server.svg)](https://github.com/ishii-masaki-646/gyazo-mcp-server)
 
-Gyazo 向けのローカル HTTP MCP サーバーです。`/mcp` の streamable HTTP transport と、MCP 標準 login に準拠した認証 broker を備えています。
+Gyazo 向けのローカル MCP サーバーです。`/mcp` の streamable HTTP transport と、MCP 標準 login に準拠した認証 broker、さらに stdio transport を備えています。
 
 ## Features
 
-- streamable HTTP transport によるローカル MCP サーバー
+- streamable HTTP transport と stdio transport の両対応
 - MCP 標準 login に対応した OAuth broker
 - Gyazo の `list / get / latest / search / upload / delete / oEmbed` tools
 - `gyazo-mcp:///image_id` 形式の resources
@@ -95,7 +95,7 @@ OAuth login を利用する場合は、Gyazo の開発者ページで OAuth Appl
 
 ## Run
 
-起動コマンドは次のとおりです。
+HTTP transport で起動する場合は次のとおりです。
 
 ```bash
 gyazo-mcp-server
@@ -104,6 +104,19 @@ gyazo-mcp-server
 MCP endpoint は既定で `http://127.0.0.1:18449/mcp` です。
 
 Codex や Claude Code から利用する場合は、この endpoint を MCP server URL として登録し、MCP login を実行してください。
+
+stdio transport で起動する場合は次のとおりです。
+
+```bash
+gyazo-mcp-server stdio
+```
+
+stdio transport では MCP login を行えないため、事前に次のいずれかを満たしておく必要があります。
+
+- `GYAZO_MCP_PERSONAL_ACCESS_TOKEN` を設定しておく
+- 先に HTTP transport 側で OAuth login を済ませ、保存済み token を作っておく
+
+将来的な `config` や `env` などの拡張を見据えて、CLI は subcommand ベースになっています。
 
 ## License
 
