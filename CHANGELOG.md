@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-04-03
 
 - `config` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) を追加しました。
 - `env` サブコマンド (`init` / `show` / `get` / `set` / `unset` / `path`) を追加しました。

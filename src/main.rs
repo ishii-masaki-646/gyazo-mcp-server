@@ -226,82 +226,6 @@ async fn run_stdio_server(app_state: Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use axum::http::StatusCode;
-    use tokio::time::timeout;
-
-    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
-
-    #[test]
-    fn direct_auth_response_parts_returns_ok_for_success() {
-        let response = direct_auth_response_parts(&Ok("done".to_string()));
-
-        assert_eq!(response, (StatusCode::OK, "done".to_string()));
-    }
-
-    #[test]
-    fn direct_auth_response_parts_preserves_failure_parts() {
-        let response =
-            direct_auth_response_parts(&Err((StatusCode::BAD_REQUEST, "bad request".to_string())));
-
-        assert_eq!(
-            response,
-            (StatusCode::BAD_REQUEST, "bad request".to_string())
-        );
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_success_message() {
-        let message = finalize_stdio_auth_outcome(Some(Ok("saved".to_string()))).unwrap();
-
-        assert_eq!(message, "saved");
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_failure_error() {
-        let error = finalize_stdio_auth_outcome(Some(Err((
-            StatusCode::BAD_GATEWAY,
-            "exchange failed".to_string(),
-        ))))
-        .unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Gyazo OAuth 認証に失敗しました (status 502 Bad Gateway: exchange failed)"
-        );
-    }
-
-    #[test]
-    fn finalize_stdio_auth_outcome_returns_missing_callback_error() {
-        let error = finalize_stdio_auth_outcome(None).unwrap_err();
-
-        assert_eq!(error.to_string(), "OAuth callback を受信できませんでした");
-    }
-
-    #[tokio::test]
-    async fn complete_direct_auth_notifies_all_waiters_and_stores_result() {
-        let completion = Arc::new(tokio::sync::Notify::new());
-        let result = tokio::sync::Mutex::new(None);
-
-        let waiter_one = completion.notified();
-        let waiter_two = completion.notified();
-
-        let response = complete_direct_auth(&completion, &result, Ok("saved".to_string())).await;
-
-        assert_eq!(response, (StatusCode::OK, "saved".to_string()));
-        assert_eq!(result.lock().await.as_ref(), Some(&Ok("saved".to_string())));
-        timeout(Duration::from_millis(100), waiter_one)
-            .await
-            .expect("1つ目の waiter が起きる必要があります");
-        timeout(Duration::from_millis(100), waiter_two)
-            .await
-            .expect("2つ目の waiter も起きる必要があります");
-    }
-}
-
 fn run_config_command(args: ConfigArgs) -> Result<()> {
     match args.command {
         ConfigCommand::Init => runtime_config::init_config(),
@@ -448,4 +372,80 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use axum::http::StatusCode;
+    use tokio::time::timeout;
+
+    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
+
+    #[test]
+    fn direct_auth_response_parts_returns_ok_for_success() {
+        let response = direct_auth_response_parts(&Ok("done".to_string()));
+
+        assert_eq!(response, (StatusCode::OK, "done".to_string()));
+    }
+
+    #[test]
+    fn direct_auth_response_parts_preserves_failure_parts() {
+        let response =
+            direct_auth_response_parts(&Err((StatusCode::BAD_REQUEST, "bad request".to_string())));
+
+        assert_eq!(
+            response,
+            (StatusCode::BAD_REQUEST, "bad request".to_string())
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_success_message() {
+        let message = finalize_stdio_auth_outcome(Some(Ok("saved".to_string()))).unwrap();
+
+        assert_eq!(message, "saved");
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_failure_error() {
+        let error = finalize_stdio_auth_outcome(Some(Err((
+            StatusCode::BAD_GATEWAY,
+            "exchange failed".to_string(),
+        ))))
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Gyazo OAuth 認証に失敗しました (status 502 Bad Gateway: exchange failed)"
+        );
+    }
+
+    #[test]
+    fn finalize_stdio_auth_outcome_returns_missing_callback_error() {
+        let error = finalize_stdio_auth_outcome(None).unwrap_err();
+
+        assert_eq!(error.to_string(), "OAuth callback を受信できませんでした");
+    }
+
+    #[tokio::test]
+    async fn complete_direct_auth_notifies_all_waiters_and_stores_result() {
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let result = tokio::sync::Mutex::new(None);
+
+        let waiter_one = completion.notified();
+        let waiter_two = completion.notified();
+
+        let response = complete_direct_auth(&completion, &result, Ok("saved".to_string())).await;
+
+        assert_eq!(response, (StatusCode::OK, "saved".to_string()));
+        assert_eq!(result.lock().await.as_ref(), Some(&Ok("saved".to_string())));
+        timeout(Duration::from_millis(100), waiter_one)
+            .await
+            .expect("1つ目の waiter が起きる必要があります");
+        timeout(Duration::from_millis(100), waiter_two)
+            .await
+            .expect("2つ目の waiter も起きる必要があります");
+    }
 }
