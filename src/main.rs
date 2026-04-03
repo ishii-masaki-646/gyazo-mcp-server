@@ -12,7 +12,10 @@ use std::{io, sync::Arc};
 use crate::app_state::{AccessTokenRecord, AppState, AuthorizedSession};
 use crate::auth::oauth::{self, OAuthCallbackQuery};
 use crate::auth::paths;
-use crate::cli::{Cli, Command, StdioArgs};
+use crate::auth::config as auth_config;
+use crate::cli::{
+    Cli, Command, ConfigArgs, ConfigCommand, EnvArgs, EnvCommand, StdioArgs,
+};
 use crate::gyazo_api::GyazoUserProfile;
 use crate::mcp_oauth::{
     authorization_server_metadata_handler, authorize_handler, maybe_complete_mcp_authorization,
@@ -299,6 +302,38 @@ mod tests {
     }
 }
 
+fn run_config_command(args: ConfigArgs) -> Result<()> {
+    match args.command {
+        ConfigCommand::Init => runtime_config::init_config(),
+        ConfigCommand::Show => runtime_config::show_config(),
+        ConfigCommand::Get(get_args) => runtime_config::get_config(&get_args.key),
+        ConfigCommand::Set(set_args) => runtime_config::set_config(&set_args.key, &set_args.value),
+        ConfigCommand::Unset(unset_args) => runtime_config::unset_config(&unset_args.key),
+        ConfigCommand::Path => {
+            let path = paths::config_file_path()
+                .ok_or_else(|| anyhow!("設定ディレクトリを特定できませんでした"))?;
+            println!("{}", path.display());
+            Ok(())
+        }
+    }
+}
+
+fn run_env_command(args: EnvArgs) -> Result<()> {
+    match args.command {
+        EnvCommand::Init => auth_config::init_env(),
+        EnvCommand::Show => auth_config::show_env(),
+        EnvCommand::Get(get_args) => auth_config::get_env(&get_args.key),
+        EnvCommand::Set(set_args) => auth_config::set_env(&set_args.key, &set_args.value),
+        EnvCommand::Unset(unset_args) => auth_config::unset_env(&unset_args.key),
+        EnvCommand::Path => {
+            let path = paths::env_file_path()
+                .ok_or_else(|| anyhow!("設定ディレクトリを特定できませんでした"))?;
+            println!("{}", path.display());
+            Ok(())
+        }
+    }
+}
+
 async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
     let service_app_state = app_state.clone();
     let service: StreamableHttpService<GyazoServer, LocalSessionManager> =
@@ -370,6 +405,21 @@ async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    if let Some(dir) = &cli.config_dir {
+        paths::set_config_dir_override(std::path::PathBuf::from(dir));
+    }
+
+    // config/env コマンドは設定ファイルの読み書きを自前で行うため、
+    // load_env_files() や RuntimeConfig::load() より前にディスパッチする。
+    // これにより config.toml が壊れていても config set で復旧できる。
+    match cli.command {
+        Some(Command::Config(args)) => return run_config_command(args),
+        Some(Command::Env(args)) => return run_env_command(args),
+        _ => {}
+    }
+
     load_env_files()?;
     let runtime_config = RuntimeConfig::load()?;
 
@@ -377,8 +427,6 @@ async fn main() -> Result<()> {
         .with_env_filter(runtime_config.tracing_env_filter())
         .with_writer(std::io::stderr)
         .init();
-
-    let cli = Cli::parse();
     let app_state = Arc::new(AppState::new(runtime_config.clone())?);
 
     match cli.command {
@@ -386,6 +434,7 @@ async fn main() -> Result<()> {
             run_stdio_auth_flow(app_state, runtime_config).await?
         }
         Some(Command::Stdio(StdioArgs { auth: false })) => run_stdio_server(app_state).await?,
+        Some(Command::Config(_) | Command::Env(_)) => unreachable!(),
         None => run_http_server(app_state, runtime_config).await?,
     }
 
