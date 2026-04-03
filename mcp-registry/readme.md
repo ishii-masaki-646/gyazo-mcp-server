@@ -1,6 +1,10 @@
-# Gyazo MCP Server
+# Gyazo MCP Server (Unofficial)
 
-Gyazo 向けの MCP (Model Context Protocol) サーバーです。
+Gyazo 向けの非公式 MCP (Model Context Protocol) サーバーです。
+
+既存の Gyazo エントリとは別に、より広い機能範囲をカバーする実装として登録しています。
+画像の一覧取得・検索・個別取得・最新取得・アップロード・削除・oEmbed メタデータ取得に加えて、
+`gyazo-mcp:///image_id` 形式のリソースアクセス、MCP OAuth broker、streamable HTTP / stdio の両 transport を提供します。
 
 ## 機能
 
