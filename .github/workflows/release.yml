@@ -278,4 +278,5 @@ jobs:
         with:
           identifier: ishiimasaki646.gyazo-mcp-server
           installers-regex: 'gyazo-mcp-server-x86_64-pc-windows-msvc\.zip$'
+          fork-user: ishii-masaki-646
           token: ${{ secrets.WINGET_PAT }}
