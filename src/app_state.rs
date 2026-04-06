@@ -8,8 +8,8 @@ use crate::{
         config::AuthConfig,
         mcp_session_store::{
             decode_signing_key, encode_signing_key, generate_signing_key, load_mcp_session_state,
-            records_to_sessions, save_mcp_session_state, sessions_to_records, sign_access_token,
-            verify_access_token,
+            map_to_stored_clients, records_to_sessions, save_mcp_session_state,
+            sessions_to_records, sign_access_token, stored_clients_to_map, verify_access_token,
         },
         paths,
         state::AuthState,
@@ -76,18 +76,22 @@ pub(crate) struct AuthorizedSession {
 impl AppState {
     pub(crate) fn new(runtime_config: RuntimeConfig) -> Result<Self> {
         let mcp_session_file_path = paths::mcp_session_file_path();
-        let (mcp_signing_key, access_tokens) =
-            load_or_initialize_mcp_sessions(mcp_session_file_path.as_deref())?;
+        let LoadedMcpSessions {
+            signing_key,
+            access_tokens,
+            registered_clients,
+        } = load_or_initialize_mcp_sessions(mcp_session_file_path.as_deref())?;
 
         Ok(Self {
             auth_config: AuthConfig::from_env(),
             auth_state: Mutex::new(AuthState::load()?),
             oauth_session: Mutex::new(OAuthSessionState {
                 access_tokens,
+                registered_clients,
                 ..Default::default()
             }),
             mcp_session_file_path,
-            mcp_signing_key,
+            mcp_signing_key: signing_key,
             runtime_config,
         })
     }
@@ -205,6 +209,10 @@ impl AppState {
             .lock()
             .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
         guard.registered_clients.insert(client_id.clone(), client);
+        // registered_clients はサーバー再起動を跨いで保持しないと、
+        // 既存クライアントが OAuth 再検証フローに入ったときに client_id 参照で
+        // 失敗し、再認証ループに陥る (auth-dropout-report 参照)。
+        self.persist_mcp_sessions(&guard)?;
         Ok(client_id)
     }
 
@@ -276,23 +284,33 @@ impl AppState {
             &crate::auth::mcp_session_store::StoredMcpSessionState {
                 signing_key: encode_signing_key(&self.mcp_signing_key),
                 sessions: records_to_sessions(&guard.access_tokens),
+                registered_clients: map_to_stored_clients(&guard.registered_clients),
             },
         )
     }
 }
 
-fn load_or_initialize_mcp_sessions(
-    path: Option<&std::path::Path>,
-) -> Result<(Vec<u8>, HashMap<String, AccessTokenRecord>)> {
+struct LoadedMcpSessions {
+    signing_key: Vec<u8>,
+    access_tokens: HashMap<String, AccessTokenRecord>,
+    registered_clients: HashMap<String, RegisteredClient>,
+}
+
+fn load_or_initialize_mcp_sessions(path: Option<&std::path::Path>) -> Result<LoadedMcpSessions> {
     let Some(path) = path else {
-        return Ok((generate_signing_key(), HashMap::new()));
+        return Ok(LoadedMcpSessions {
+            signing_key: generate_signing_key(),
+            access_tokens: HashMap::new(),
+            registered_clients: HashMap::new(),
+        });
     };
 
     if let Some(stored_state) = load_mcp_session_state(path)? {
-        return Ok((
-            decode_signing_key(&stored_state.signing_key)?,
-            sessions_to_records(stored_state.sessions),
-        ));
+        return Ok(LoadedMcpSessions {
+            signing_key: decode_signing_key(&stored_state.signing_key)?,
+            access_tokens: sessions_to_records(stored_state.sessions),
+            registered_clients: stored_clients_to_map(stored_state.registered_clients),
+        });
     }
 
     let signing_key = generate_signing_key();
@@ -301,8 +319,13 @@ fn load_or_initialize_mcp_sessions(
         &crate::auth::mcp_session_store::StoredMcpSessionState {
             signing_key: encode_signing_key(&signing_key),
             sessions: Vec::new(),
+            registered_clients: Vec::new(),
         },
     )?;
 
-    Ok((signing_key, HashMap::new()))
+    Ok(LoadedMcpSessions {
+        signing_key,
+        access_tokens: HashMap::new(),
+        registered_clients: HashMap::new(),
+    })
 }

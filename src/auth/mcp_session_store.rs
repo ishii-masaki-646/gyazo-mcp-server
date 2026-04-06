@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use uuid::Uuid;
 
-use crate::{app_state::AccessTokenRecord, gyazo_api::GyazoUserProfile};
+use crate::{
+    app_state::{AccessTokenRecord, RegisteredClient},
+    gyazo_api::GyazoUserProfile,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -16,7 +19,11 @@ const TOKEN_PREFIX: &str = "gmcp1";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredMcpSessionState {
     pub(crate) signing_key: String,
+    #[serde(default)]
     pub(crate) sessions: Vec<StoredMcpSession>,
+    /// 既存ファイルとの後方互換のため、`#[serde(default)]` で空ベクタを許容する。
+    #[serde(default)]
+    pub(crate) registered_clients: Vec<StoredRegisteredClient>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +31,12 @@ pub(crate) struct StoredMcpSession {
     pub(crate) session_id: String,
     pub(crate) backend_access_token: String,
     pub(crate) gyazo_user: GyazoUserProfile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StoredRegisteredClient {
+    pub(crate) client_id: String,
+    pub(crate) redirect_uris: Vec<String>,
 }
 
 pub(crate) fn load_mcp_session_state(path: &Path) -> Result<Option<StoredMcpSessionState>> {
@@ -144,6 +157,34 @@ pub(crate) fn records_to_sessions(
         .collect()
 }
 
+pub(crate) fn stored_clients_to_map(
+    clients: Vec<StoredRegisteredClient>,
+) -> HashMap<String, RegisteredClient> {
+    clients
+        .into_iter()
+        .map(|client| {
+            (
+                client.client_id,
+                RegisteredClient {
+                    redirect_uris: client.redirect_uris,
+                },
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn map_to_stored_clients(
+    clients: &HashMap<String, RegisteredClient>,
+) -> Vec<StoredRegisteredClient> {
+    clients
+        .iter()
+        .map(|(client_id, client)| StoredRegisteredClient {
+            client_id: client_id.clone(),
+            redirect_uris: client.redirect_uris.clone(),
+        })
+        .collect()
+}
+
 fn token_signature(signing_key: &[u8], session_id: &str) -> Result<String> {
     let mut mac =
         HmacSha256::new_from_slice(signing_key).context("HMAC signer を初期化できませんでした")?;
@@ -165,10 +206,13 @@ mod tests {
 
     use super::{
         StoredMcpSessionState, decode_signing_key, encode_signing_key, generate_signing_key,
-        load_mcp_session_state, records_to_sessions, save_mcp_session_state, sessions_to_records,
-        sign_access_token, verify_access_token,
+        load_mcp_session_state, map_to_stored_clients, records_to_sessions, save_mcp_session_state,
+        sessions_to_records, sign_access_token, stored_clients_to_map, verify_access_token,
     };
-    use crate::{app_state::AccessTokenRecord, gyazo_api::GyazoUserProfile};
+    use crate::{
+        app_state::{AccessTokenRecord, RegisteredClient},
+        gyazo_api::GyazoUserProfile,
+    };
 
     #[test]
     fn signs_and_verifies_access_token() {
@@ -209,6 +253,7 @@ mod tests {
         let state = StoredMcpSessionState {
             signing_key: encode_signing_key(&signing_key),
             sessions: records_to_sessions(&records),
+            registered_clients: Vec::new(),
         };
 
         fs::create_dir_all(&dir).unwrap();
@@ -220,6 +265,88 @@ mod tests {
             signing_key
         );
         assert_eq!(sessions_to_records(loaded.sessions), records);
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn saves_and_loads_registered_clients() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gyazo-mcp-clients-test-{unique}"));
+        let path = dir.join("mcp_sessions.toml");
+        let signing_key = generate_signing_key();
+
+        let mut clients = HashMap::new();
+        clients.insert(
+            "client-abc".to_string(),
+            RegisteredClient {
+                redirect_uris: vec![
+                    "http://127.0.0.1:18449/oauth/callback".to_string(),
+                    "http://localhost:18449/oauth/callback".to_string(),
+                ],
+            },
+        );
+        clients.insert(
+            "client-xyz".to_string(),
+            RegisteredClient {
+                redirect_uris: vec!["http://127.0.0.1:18449/cb".to_string()],
+            },
+        );
+
+        let state = StoredMcpSessionState {
+            signing_key: encode_signing_key(&signing_key),
+            sessions: Vec::new(),
+            registered_clients: map_to_stored_clients(&clients),
+        };
+
+        fs::create_dir_all(&dir).unwrap();
+        save_mcp_session_state(&path, &state).unwrap();
+        let loaded = load_mcp_session_state(&path).unwrap().unwrap();
+
+        let restored = stored_clients_to_map(loaded.registered_clients);
+        assert_eq!(restored.len(), 2);
+        assert_eq!(
+            restored.get("client-abc").unwrap().redirect_uris,
+            vec![
+                "http://127.0.0.1:18449/oauth/callback".to_string(),
+                "http://localhost:18449/oauth/callback".to_string(),
+            ]
+        );
+        assert_eq!(
+            restored.get("client-xyz").unwrap().redirect_uris,
+            vec!["http://127.0.0.1:18449/cb".to_string()]
+        );
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn loads_legacy_session_file_without_registered_clients_field() {
+        // 既存の mcp_sessions.toml は registered_clients フィールドを持たないため、
+        // 後方互換のために `#[serde(default)]` で空ベクタとして読めることを保証する。
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gyazo-mcp-legacy-test-{unique}"));
+        let path = dir.join("mcp_sessions.toml");
+        fs::create_dir_all(&dir).unwrap();
+
+        // フィールドを意図的に省略した legacy 形式の TOML
+        fs::write(
+            &path,
+            "signing_key = \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n",
+        )
+        .unwrap();
+
+        let loaded = load_mcp_session_state(&path).unwrap().unwrap();
+        assert!(loaded.sessions.is_empty());
+        assert!(loaded.registered_clients.is_empty());
 
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
