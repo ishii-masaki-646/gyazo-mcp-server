@@ -67,11 +67,17 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - `mcp-registry/` ディレクトリに Docker MCP Catalog への登録用メタデータ (`server.yaml` / `tools.json` / `readme.md`) を管理します。
 
 ## 配信チャネル
-- **crates.io**: `cargo install gyazo-mcp-server` でインストール。`cargo publish` で公開。
+- **crates.io**: `cargo install gyazo-mcp-server` でインストール。リリース CI で `cargo publish` を自動実行 (`CARGO_REGISTRY_TOKEN` が必要)。
 - **Docker Hub / ghcr.io**: リリース CI でマルチアーキイメージ (amd64 + arm64) を自動 push。
 - **Homebrew tap**: `ishii-masaki-646/homebrew-tap` リポジトリで formula を管理。リリース CI で formula のバージョンとチェックサムを自動更新。`HOMEBREW_TAP_TOKEN` (PAT) が必要。
-- **winget**: `winget/` ディレクトリに manifest を管理。microsoft/winget-pkgs に PR で登録。
+- **winget**: `winget/` ディレクトリに manifest を管理。リリース CI で `vedantmgoyal9/winget-releaser` 経由で microsoft/winget-pkgs に更新 PR を自動投稿。`WINGET_PAT` が必要。
 - **GitHub Releases**: タグ push 時にバイナリ (Linux / macOS / Windows) と CHANGELOG からのリリースノートを自動生成。
+
+## リリース手順の注意点
+- タグを push する前に必ず `Cargo.toml` の `version` と `CHANGELOG.md` の見出しを揃えてください。
+- リリース CI は最初に `verify` ジョブを走らせ、`v<VERSION>` タグと `Cargo.toml` の `version` が一致しない場合は後続の build / release / docker / homebrew / winget / crates-io をすべて止めます。配信チャネル間の不整合を防ぐためのガードです。
+- `verify` ジョブで失敗した場合は、タグを削除 (`git push --delete origin v<VERSION>`) して `Cargo.toml` を直してから再度タグを切り直してください。
+- Docker イメージの `:latest` タグはリリース CI で毎回無条件に上書きされます。古いブランチからの hotfix リリース等で `:latest` を「過去バージョン」で上書きしないよう、必ず最新版から派生したタグだけを push してください。古いブランチからリリースする場合は release.yml の `:latest` タグ行を一時的に外すなどの対応が必要です。
 - **Docker MCP Catalog**: `mcp-registry/` のメタデータを docker/mcp-registry に PR で登録。
 
 ## Transport 運用メモ

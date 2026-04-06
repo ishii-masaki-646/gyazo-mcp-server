@@ -13,8 +13,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # タグと Cargo.toml の version が一致しているかを最初に検証する。
+  # ここで失敗させることで、後続の build / release / docker / homebrew / winget /
+  # crates-io が一切走らないようにし、配信チャネル間の不整合や
+  # 「タグだけ古い・新しい」状態の publish を防ぐ。
+  verify:
+    name: Verify tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compare versions
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "Tag and Cargo.toml are both $TAG_VERSION"
+
   build:
     name: Build (${{ matrix.target }})
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -103,6 +123,20 @@ jobs:
         with:
           body: ${{ steps.notes.outputs.body }}
           files: artifacts/*
+
+  crates-io:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish to crates.io
+        run: cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
 
   docker:
     name: Docker Image
