@@ -89,7 +89,7 @@ jobs:
           7z a ../../../gyazo-mcp-server-${{ matrix.target }}.zip gyazo-mcp-server.exe
           cd ../../..
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: gyazo-mcp-server-${{ matrix.target }}
           path: gyazo-mcp-server-${{ matrix.target }}.*
@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts
           merge-multiple: true
