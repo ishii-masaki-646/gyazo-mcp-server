@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 - 2026-04-06
+
+- 動的に登録された OAuth クライアント情報 (`registered_clients`) を `mcp_sessions.toml` に永続化するようにしました。サーバー再起動後に MCP クライアント側が OAuth 再検証フローに入ると `client_id` が未登録扱いになり、再認証ループに陥っていた不具合を解消しました。既存の `mcp_sessions.toml` は `#[serde(default)]` により後方互換のまま読み込めます。
+- Windows の `service install` で生成する `.ps1` を UTF-8 BOM 付きで書き出すようにしました。Windows PowerShell 5.x が BOM なし UTF-8 を ANSI コードページとして解釈し、日本語等が文字化けまたはパースエラーになる問題を解消しました。
+- Windows の `service install` で生成するタスクを `powershell.exe -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden ..."` 経由で起動するようにしました。タスクスケジューラから直接 EXE を起動するとフォアグラウンドのコンソールウィンドウが残ってしまう不具合を解消しました。
+- CI の test ジョブを `ubuntu-latest` / `macos-latest` / `windows-latest` の matrix 構成に変更しました。これにより `service.rs` の OS 専用テストが CI で実行されるようになりました。
+- リリース CI に winget 自動更新ジョブを追加しました。タグ push 時に `vedantmgoyal9/winget-releaser` 経由で `microsoft/winget-pkgs` に更新 PR を自動投稿します。
+- リリース CI のビルド matrix に `aarch64-pc-windows-msvc` を追加しました。Snapdragon X 等の Windows on ARM 向けバイナリ (`gyazo-mcp-server-aarch64-pc-windows-msvc.zip`) も GitHub Release にアタッチされます。
+- リリース CI に crates.io 自動 publish ジョブを追加しました。タグ push 時に `cargo publish` を自動実行します (`CARGO_REGISTRY_TOKEN` Repository secret が必要)。
+- リリース CI に `verify` ジョブを最前段に追加しました。`v<VERSION>` タグと `Cargo.toml` の `version` が一致しない場合、build / release / docker / homebrew / winget / crates-io をすべて止めます。配信チャネル間の不整合を構造的に防ぐためのガードです。
+
 ## 0.5.0 - 2026-04-04
 
 - Docker イメージを追加しました。コンテナ内では `/.dockerenv` 検出により自動的に `0.0.0.0` にバインドします。

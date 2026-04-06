@@ -413,9 +413,15 @@ fn scripts_dir() -> Result<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn generate_install_ps1(binary: &std::path::Path) -> String {
+    // タスクスケジューラから直接 EXE を起動するとフォアグラウンドのコンソール
+    // ウィンドウが残ってしまうため、`powershell.exe -WindowStyle Hidden` の中で
+    // さらに `Start-Process -WindowStyle Hidden` を呼んでバックグラウンドに回す。
+    // PowerShell の文字列リテラル中のダブルクォートは `""` でエスケープする。
     let task = task_name();
     format!(
-        r#"$action = New-ScheduledTaskAction -Execute '{binary}'
+        r#"$action = New-ScheduledTaskAction `
+  -Execute "powershell.exe" `
+  -Argument "-WindowStyle Hidden -Command ""Start-Process -WindowStyle Hidden -FilePath '{binary}'"""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
 Register-ScheduledTask -TaskName '{task}' -Action $action -Trigger $trigger -Settings $settings -Description 'Gyazo MCP Server (HTTP transport)'
@@ -465,6 +471,21 @@ fn run_powershell_script(script_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// PowerShell スクリプトを UTF-8 BOM 付きで書き出す。
+///
+/// Windows PowerShell 5.x は歴史的経緯により BOM なし UTF-8 を OS の現行
+/// ANSI コードページとして解釈してしまい、日本語等の非 ASCII 文字が文字化け
+/// したりパースエラーを起こす。BOM (`EF BB BF`) を先頭に付けると Unicode
+/// として正しく扱われるため、`.ps1` を出力するときは必ずこのヘルパーを使う。
+#[cfg(target_os = "windows")]
+fn write_ps1_with_bom(path: &std::path::Path, content: &str) -> Result<()> {
+    let mut bytes = Vec::with_capacity(content.len() + 3);
+    bytes.extend_from_slice(b"\xEF\xBB\xBF");
+    bytes.extend_from_slice(content.as_bytes());
+    fs::write(path, bytes)
+        .with_context(|| format!("スクリプトを書き込めませんでした: {}", path.display()))
+}
+
 #[cfg(target_os = "windows")]
 fn install_windows_task(binary: &std::path::Path) -> Result<()> {
     let dir = scripts_dir()?;
@@ -472,12 +493,7 @@ fn install_windows_task(binary: &std::path::Path) -> Result<()> {
 
     let script_path = dir.join("service-install.ps1");
     let script_content = generate_install_ps1(binary);
-    fs::write(&script_path, &script_content).with_context(|| {
-        format!(
-            "スクリプトを書き込めませんでした: {}",
-            script_path.display()
-        )
-    })?;
+    write_ps1_with_bom(&script_path, &script_content)?;
 
     println!("スクリプトを作成しました: {}", script_path.display());
 
@@ -494,12 +510,7 @@ fn uninstall_windows_task() -> Result<()> {
 
     let script_path = dir.join("service-uninstall.ps1");
     let script_content = generate_uninstall_ps1();
-    fs::write(&script_path, &script_content).with_context(|| {
-        format!(
-            "スクリプトを書き込めませんでした: {}",
-            script_path.display()
-        )
-    })?;
+    write_ps1_with_bom(&script_path, &script_content)?;
 
     run_powershell_script(&script_path)?;
 
@@ -599,9 +610,58 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn install_ps1_runs_binary_via_hidden_powershell() {
+        // タスクスケジューラから直接 EXE を起動するとフォアグラウンドの
+        // コンソールウィンドウが残るため、powershell.exe + Start-Process で
+        // バックグラウンド化していることを保証する。
+        let binary = PathBuf::from(r"C:\bin\gyazo-mcp-server.exe");
+        let ps1 = generate_install_ps1(&binary);
+
+        assert!(
+            ps1.contains(r#"-Execute "powershell.exe""#),
+            "powershell.exe を Execute に指定していません"
+        );
+        assert!(
+            ps1.contains("Start-Process -WindowStyle Hidden"),
+            "Start-Process でバックグラウンド起動にしていません"
+        );
+        assert!(
+            ps1.contains("-WindowStyle Hidden -Command"),
+            "powershell.exe の WindowStyle が Hidden ではありません"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn uninstall_ps1_contains_task_name() {
         let ps1 = generate_uninstall_ps1();
         assert!(ps1.contains(task_name()));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn write_ps1_with_bom_prepends_utf8_bom() {
+        // Windows PowerShell 5.x が日本語を文字化けせず読めるよう、
+        // 出力先頭に UTF-8 BOM (EF BB BF) が付くことを保証する。
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gyazo-mcp-ps1-bom-test-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.ps1");
+
+        write_ps1_with_bom(&path, "Write-Host 'こんにちは'\n").unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..3], b"\xEF\xBB\xBF", "UTF-8 BOM が付いていません");
+        assert_eq!(
+            std::str::from_utf8(&bytes[3..]).unwrap(),
+            "Write-Host 'こんにちは'\n"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]
