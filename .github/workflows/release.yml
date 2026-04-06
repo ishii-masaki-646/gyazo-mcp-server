@@ -231,3 +231,15 @@ jobs:
           git add Formula/gyazo-mcp-server.rb
           git commit -m "Update gyazo-mcp-server to ${{ steps.version.outputs.version }}"
           git push
+
+  winget:
+    name: Update winget Package
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit package update to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: ishiimasaki646.gyazo-mcp-server
+          installers-regex: 'gyazo-mcp-server-x86_64-pc-windows-msvc\.zip$'
+          token: ${{ secrets.WINGET_PAT }}
