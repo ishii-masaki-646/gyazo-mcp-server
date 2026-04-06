@@ -70,7 +70,7 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - **crates.io**: `cargo install gyazo-mcp-server` でインストール。リリース CI で `cargo publish` を自動実行 (`CARGO_REGISTRY_TOKEN` が必要)。
 - **Docker Hub / ghcr.io**: リリース CI でマルチアーキイメージ (amd64 + arm64) を自動 push。
 - **Homebrew tap**: `ishii-masaki-646/homebrew-tap` リポジトリで formula を管理。リリース CI で formula のバージョンとチェックサムを自動更新。`HOMEBREW_TAP_TOKEN` (PAT) が必要。
-- **winget**: `winget/` ディレクトリに manifest を管理。リリース CI で `vedantmgoyal9/winget-releaser` 経由で microsoft/winget-pkgs に更新 PR を自動投稿。`WINGET_PAT` が必要。
+- **winget**: リリース CI で `vedantmgoyal9/winget-releaser` (内部的に Komac) 経由で microsoft/winget-pkgs に更新 PR を自動投稿。`WINGET_PAT` (fork への push 用 PAT) と `ishii-masaki-646/winget-pkgs` の fork が必要。`winget/` ディレクトリには新規申請時のスナップショットだけが残っており、CI からは一切参照されません (詳細は `winget/README.md`)。
 - **GitHub Releases**: タグ push 時にバイナリ (Linux / macOS / Windows) と CHANGELOG からのリリースノートを自動生成。
 
 ## リリース手順の注意点
