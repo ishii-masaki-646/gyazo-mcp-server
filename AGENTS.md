@@ -89,3 +89,4 @@ Rust 2024 edition を前提とし、整形は標準の `rustfmt` に従ってく
 - `--config-dir` で一時 override した状態での `service install` は、永続化されていないか永続化値と不一致の場合に警告と確認を表示します。
 - `is_installed()` は `env init` 完了時のヒント表示に使用されます。サービス登録済みの場合はヒントを表示しません。
 - systemd unit ファイルのパスはダブルクォートで囲んでおり、空白を含むパスにも対応しています。
+- Windows 向けに `.ps1` を生成する場合は必ず UTF-8 BOM 付きで書き出してください (`write_ps1_with_bom`)。Windows PowerShell 5.x が BOM なし UTF-8 を ANSI コードページとして解釈し、日本語等が文字化けまたはパースエラーになるためです。
