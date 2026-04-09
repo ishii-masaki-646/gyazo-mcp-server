@@ -94,6 +94,11 @@ impl RuntimeConfig {
         SocketAddr::new(self.bind_ip, self.tcp_port)
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn tcp_port(&self) -> u16 {
+        self.tcp_port
+    }
+
     pub(crate) fn base_url(&self) -> String {
         if let Some(url) = &self.base_url {
             return url.trim_end_matches('/').to_string();
