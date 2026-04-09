@@ -8,6 +8,21 @@ use crate::auth::{config as auth_config, paths};
 const SERVICE_NAME: &str = "gyazo-mcp-server";
 
 pub(crate) fn install() -> Result<()> {
+    // 既に登録されている場合は何もしない (冪等)。
+    // 再登録したい場合は先に uninstall を実行してもらう。
+    //
+    // 非対応 OS では `is_installed_impl()` が常に false を返すので、
+    // ここで早期 return すると常に未登録扱いになり、後段の OS 分岐の
+    // `bail!` (非対応 OS エラー) に到達できなくなる。冪等化は対応 OS
+    // でだけ行い、非対応 OS では従来どおり下の bail! まで進ませる。
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    if is_installed() {
+        println!("サービスは既に登録されています。");
+        println!("  状態確認: gyazo-mcp-server service status");
+        println!("  再登録するには先に 'gyazo-mcp-server service uninstall' を実行してください。");
+        return Ok(());
+    }
+
     // --config-dir で一時 override されているが永続化されていない場合、
     // 常駐後のサービスはデフォルトの設定ディレクトリに戻ってしまう。
     // 意図しない設定不一致を防ぐため、確認を求める。
@@ -85,6 +100,17 @@ pub(crate) fn install() -> Result<()> {
 }
 
 pub(crate) fn uninstall() -> Result<()> {
+    // 登録されていない場合は何もしない (冪等)。
+    // 非対応 OS では `is_installed_impl()` が常に false を返すので、
+    // ここで早期 return すると後段の `bail!` (非対応 OS エラー) に
+    // 到達できなくなる。冪等化は対応 OS でだけ行う。
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    if !is_installed() {
+        println!("サービスは登録されていません。");
+        println!("  登録するには 'gyazo-mcp-server service install' を実行してください。");
+        return Ok(());
+    }
+
     #[cfg(target_os = "linux")]
     return uninstall_systemd();
 
