@@ -412,10 +412,11 @@ mod tests {
     use axum::http::StatusCode;
     use tokio::time::timeout;
 
-    use super::{
-        complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome,
-        service_runtime_port_hint,
-    };
+    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
+    // service_runtime_port_hint を参照する回帰テストは非 Windows 限定。
+    // Windows ビルドでは下記 import が unused 警告になるので cfg ガードする。
+    #[cfg(not(target_os = "windows"))]
+    use super::service_runtime_port_hint;
 
     #[cfg(not(target_os = "windows"))]
     #[test]

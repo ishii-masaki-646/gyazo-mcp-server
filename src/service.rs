@@ -1200,11 +1200,22 @@ mod tests {
             "残存プロセスを警告として通知していません: {ps1}"
         );
 
-        // 自動停止していないこと
-        assert!(
-            !ps1.contains("Stop-Process"),
-            "uninstall ps1 で Stop-Process を呼んでいます (自動停止に回帰): {ps1}"
-        );
+        // 自動停止していないこと:
+        // `Stop-Process` という文字列はヒント表示用の `Write-Host '停止例: ...'`
+        // 内に出てくるため、単純な `!contains("Stop-Process")` だと誤検知する。
+        // 「実行コマンドとして書かれた `Stop-Process`」だけを禁止したいので、
+        // `Stop-Process` を含む行はすべて `Write-Host` (= ヒント表示) で
+        // 始まることを確認する形に変更。
+        for line in ps1.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.contains("Stop-Process") {
+                assert!(
+                    trimmed.starts_with("Write-Host"),
+                    "Stop-Process が Write-Host (ヒント表示) 以外の行で使われています \
+                     (自動停止に回帰): {line}"
+                );
+            }
+        }
         assert!(
             !ps1.contains("Get-Process -Name gyazo-mcp-server"),
             "Get-Process -Name 方式に回帰しています: {ps1}"
