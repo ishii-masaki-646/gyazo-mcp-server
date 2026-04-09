@@ -71,11 +71,7 @@ cargo install gyazo-mcp-server
 cargo install --path .
 ```
 
-アンインストールは次のとおりです。
-
-```bash
-cargo uninstall gyazo-mcp-server
-```
+アンインストール手順は [Uninstall](#uninstall) を参照してください。
 
 ## Quick Start
 
@@ -321,6 +317,89 @@ Windows のタスクスケジューラから登録したタスクは `powershell
 ```powershell
 Stop-Process -Id <PID> -Force
 ```
+
+## Uninstall
+
+クリーンにアンインストールするには、次の 2 段階で進めてください。
+
+1. **事前クリーニング** — サービス登録の解除と、実行中プロセスの停止 (OS 別)
+2. **パッケージのアンインストール** — 利用したパッケージマネージャの uninstall コマンド (エコシステム別)
+
+サービス登録を残したままバイナリを削除すると、再ログイン時にタスクスケジューラや systemd / launchd が存在しないバイナリを起動しようとします。また Windows では実行中バイナリを削除できないため、プロセスが残っているとアンインストール自体が `access denied` で失敗します (Linux / macOS は実行中ファイルを削除しても OS が許す仕様なのでアンインストール自体は通りますが、いずれにせよプロセスは事前に止めておくのが安全です)。
+
+### 1. 事前クリーニング (OS 別)
+
+#### Linux / macOS
+
+```bash
+# サービス登録を解除 (登録している場合)
+gyazo-mcp-server service uninstall
+
+# 実行中の gyazo-mcp-server プロセスをすべて停止
+pkill -x gyazo-mcp-server
+```
+
+#### Windows (PowerShell)
+
+```powershell
+# サービス登録を解除 (登録している場合)
+gyazo-mcp-server service uninstall
+
+# 実行中の gyazo-mcp-server プロセスをすべて停止
+# (HTTP transport / stdio transport の両方を含めて停止します)
+Get-Process gyazo-mcp-server -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+#### Docker
+
+不要です。Docker は OS のプロセス空間と分離されているため、コンテナを停止すれば内部の `gyazo-mcp-server` プロセスも一緒に終了します。手順 2 のコンテナ停止コマンドにそのまま進んでください。
+
+### 2. パッケージのアンインストール (エコシステム別)
+
+インストール時に使ったパッケージマネージャに合わせて、次のいずれかを実行してください。
+
+#### Homebrew (macOS / Linux)
+
+```bash
+brew uninstall gyazo-mcp-server
+# tap も外す場合:
+brew untap ishii-masaki-646/tap
+```
+
+#### winget (Windows)
+
+```powershell
+winget uninstall ishiimasaki646.gyazo-mcp-server
+```
+
+#### cargo install
+
+```bash
+cargo uninstall gyazo-mcp-server
+```
+
+#### Docker
+
+```bash
+# 該当のコンテナを停止・削除
+docker stop gyazo-mcp-server && docker rm gyazo-mcp-server
+# イメージも削除する場合
+docker rmi ishiimasaki646/gyazo-mcp-server
+```
+
+### 設定ファイルの削除 (任意)
+
+`config.toml` / `.env` / OAuth token 等の設定ファイルは、上記いずれの手順でも削除されません。完全に消したい場合は次のディレクトリを手動で削除してください。
+
+| OS | パス |
+|----|------|
+| Linux | `~/.config/gyazo-mcp-server/` |
+| macOS | `~/Library/Application Support/gyazo-mcp-server/` |
+| Windows | `%APPDATA%\gyazo-mcp-server\` |
+
+### Windows でアンインストールが access denied で失敗する場合
+
+事前クリーニングを行わずにパッケージマネージャの uninstall を直接実行してしまった場合、Windows では実行中の `gyazo-mcp-server.exe` を削除できないため `access denied` で失敗することがあります。その場合は上記「[1. 事前クリーニング (Windows)](#windows-powershell)」を実行してから、もう一度パッケージマネージャの uninstall を実行してください。
 
 ## HTTP Client Examples
 
