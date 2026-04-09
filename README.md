@@ -310,6 +310,18 @@ systemd が存在しない Linux 環境や BSD 等では、手動でサービス
 
 `--config-dir` で一時的に設定ディレクトリを変更した状態で `service install` を実行すると、常駐後のサービスが異なる設定を参照する可能性があるため、警告と確認が表示されます。常駐化する場合は、先に `config set config_dir` で永続化してください。
 
+### Windows の `service uninstall` の注意事項
+
+Windows のタスクスケジューラから登録したタスクは `powershell.exe -Command "Start-Process ..."` で `gyazo-mcp-server.exe` を別プロセスとして切り離して起動するため、`Unregister-ScheduledTask` だけでは本体プロセスが停止せず、サービス登録を解除した後もそのまま動き続けます。
+
+`service uninstall` は本体プロセスを自動停止しません (別ポートで手動起動した HTTP インスタンス等、サービス管理対象でないプロセスを巻き込まないため)。そのかわり、登録解除のあとに `Get-NetTCPConnection -State Listen` から `ProcessName` が `gyazo-mcp-server` のプロセスを走査し、もし残っていれば PID と LocalPort を警告として表示します。`stdio` モードで動いているインスタンスは TCP ポートを bind しないため検出対象には含まれません。
+
+警告に表示されたプロセスを停止する場合は、PowerShell から手動で次のように実行してください。
+
+```powershell
+Stop-Process -Id <PID> -Force
+```
+
 ## HTTP Client Examples
 
 ### Codex CLI

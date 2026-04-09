@@ -563,9 +563,41 @@ Write-Host 'タスク "{task}" を登録しました。'
 fn generate_uninstall_ps1() -> String {
     let task = task_name();
     let prelude = ps1_utf8_prelude();
+    // タスク登録を解除したあと、実行中の gyazo-mcp-server.exe
+    // (HTTP listen 中) を検出して、もし残っていれば警告だけを出す。
+    //
+    // タスクは `powershell.exe -Command "Start-Process ..."` で本体を
+    // 切り離して起動しているため、`Unregister-ScheduledTask` だけでは
+    // 本体プロセスが停止せず、サービスが解除された後もそのまま動き続ける。
+    // ただし、停止まで自動で行うと「別ポートで手動起動した HTTP インスタンス」
+    // など、サービス管理対象でない gyazo-mcp-server まで巻き込んでしまう
+    // 可能性があるため、停止操作はユーザーに委ねる。
+    //
+    // 検出対象は次の方針:
+    //   1. `Get-NetTCPConnection -State Listen` で全 listen ポートを列挙
+    //   2. その OwningProcess の `ProcessName` が `gyazo-mcp-server` のものだけ抽出
+    //   3. 該当する PID と LocalPort を警告として表示
+    //
+    // この方式は HTTP モードのインスタンスを正確に拾え、stdio モードで動いて
+    // いる同名プロセスは TCP listen していないので検出対象に含まれない。
     format!(
         r#"{prelude}Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false
 Write-Host 'タスク "{task}" を解除しました。'
+
+$listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue
+$running = @()
+foreach ($conn in $listeners) {{
+    $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -eq 'gyazo-mcp-server') {{
+        $running += [PSCustomObject]@{{ ProcessId = $conn.OwningProcess; LocalPort = $conn.LocalPort }}
+    }}
+}}
+$running = $running | Sort-Object ProcessId, LocalPort -Unique
+if ($running) {{
+    Write-Warning '実行中の gyazo-mcp-server (HTTP transport) プロセスが残っています。サービス登録は解除されましたが、これらのプロセスは引き続き動作します。停止が必要な場合は手動で停止してください。'
+    $running | Format-Table -AutoSize ProcessId, LocalPort | Out-String | Write-Host
+    Write-Host '停止例: Stop-Process -Id <PID> -Force'
+}}
 "#,
     )
 }
@@ -959,6 +991,62 @@ mod tests {
                 "{label} ps1 に $OutputEncoding の UTF-8 化が含まれていません"
             );
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn uninstall_ps1_warns_about_running_listener_processes_without_stopping_them() {
+        // 回帰テスト:
+        // - uninstall は本体プロセスを自動停止しない (別ポートで手動起動した
+        //   HTTP インスタンス等を巻き込まないため)。
+        // - そのかわり、Unregister-ScheduledTask の後に
+        //   `Get-NetTCPConnection -State Listen` で listen 中のプロセスを
+        //   走査し、`ProcessName -eq 'gyazo-mcp-server'` のものが残っていれば
+        //   PID と LocalPort を警告として表示する。
+        // - Stop-Process 方式 (どんな形でも自動停止する) には回帰していない
+        //   こと。
+        let ps1 = generate_uninstall_ps1();
+
+        // 検出ロジックの存在
+        assert!(
+            ps1.contains("Get-NetTCPConnection -State Listen"),
+            "listen ポートを起点に走査する形式になっていません: {ps1}"
+        );
+        assert!(
+            ps1.contains("OwningProcess"),
+            "OwningProcess から PID を辿っていません: {ps1}"
+        );
+        assert!(
+            ps1.contains("ProcessName -eq 'gyazo-mcp-server'"),
+            "検出対象を gyazo-mcp-server に限定していません: {ps1}"
+        );
+        assert!(
+            ps1.contains("Write-Warning"),
+            "残存プロセスを警告として通知していません: {ps1}"
+        );
+
+        // 自動停止していないこと
+        assert!(
+            !ps1.contains("Stop-Process"),
+            "uninstall ps1 で Stop-Process を呼んでいます (自動停止に回帰): {ps1}"
+        );
+        assert!(
+            !ps1.contains("Get-Process -Name gyazo-mcp-server"),
+            "Get-Process -Name 方式に回帰しています: {ps1}"
+        );
+
+        // 検出ブロックは Unregister-ScheduledTask の後に書かれていること
+        // (まずサービス登録を解除してから残存検出する順序の回帰防止)
+        let unregister_pos = ps1
+            .find("Unregister-ScheduledTask")
+            .expect("Unregister-ScheduledTask が含まれていません");
+        let detect_pos = ps1
+            .find("Get-NetTCPConnection -State Listen")
+            .expect("検出ブロックが含まれていません");
+        assert!(
+            unregister_pos < detect_pos,
+            "Unregister-ScheduledTask が検出ブロックより後にあります (順序が逆): {ps1}"
+        );
     }
 
     #[cfg(target_os = "windows")]
