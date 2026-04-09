@@ -39,6 +39,11 @@ struct GyazoGetImageArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GyazoOEmbedArgs {
     image_url: String,
+    /// 組み立て済み `img_tag_html` の `<img>` タグに使う alt 属性。省略時は
+    /// `"Gyazo image"`。Gyazo の oEmbed エンドポイントは title 等のリッチ
+    /// メタデータを返さないため、呼び出し側で意味のある alt を指定したい
+    /// 場合に使う。
+    alt: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -187,15 +192,94 @@ impl GyazoServer {
         json_result(uploaded)
     }
 
-    #[rmcp::tool(description = "Gyazo 画像ページ URL の oEmbed メタデータを取得します")]
+    #[rmcp::tool(
+        description = "Gyazo 画像ページ URL の oEmbed メタデータを取得します。戻り値の oembed_discovery_link は oEmbed spec 第 4 章で定義された discovery 用の <link rel=\"alternate\" type=\"application/json+oembed\" ...> タグで、HTML ページの <head> に置くと oEmbed 対応クライアントが埋め込み情報を発見できます。img_tag_html は spec 外の便利機能で、url / width / height と alt から組み立て済みの <img> タグです (markdown / HTML にそのまま貼って画像埋め込みに使えます)。oEmbed エンドポイントは title 等のリッチメタデータを返さないため、画像のタイトルや説明文等が必要な場合は gyazo_get_image を併用してください。"
+    )]
     async fn gyazo_get_oembed_metadata(
         &self,
-        Parameters(GyazoOEmbedArgs { image_url }): Parameters<GyazoOEmbedArgs>,
+        Parameters(GyazoOEmbedArgs { image_url, alt }): Parameters<GyazoOEmbedArgs>,
     ) -> Result<CallToolResult, McpError> {
         let oembed = get_oembed(&image_url).await.map_err(internal_error)?;
+        let img_tag_html = build_oembed_img_tag(
+            &oembed.url,
+            oembed.width,
+            oembed.height,
+            alt.as_deref().unwrap_or(DEFAULT_OEMBED_IMG_ALT),
+        );
+        let oembed_discovery_link = build_oembed_discovery_link(&image_url);
 
-        json_result(oembed)
+        json_result(json!({
+            "version": oembed.version,
+            "type": oembed.embed_type,
+            "provider_name": oembed.provider_name,
+            "provider_url": oembed.provider_url,
+            "url": oembed.url,
+            "width": oembed.width,
+            "height": oembed.height,
+            "oembed_discovery_link": oembed_discovery_link,
+            "img_tag_html": img_tag_html,
+        }))
     }
+}
+
+/// `gyazo_get_oembed_metadata` の `alt` 引数が省略されたときに
+/// `img_tag_html` の `alt` 属性に使うデフォルト値。
+const DEFAULT_OEMBED_IMG_ALT: &str = "Gyazo image";
+
+/// oEmbed spec 第 4 章で定義された discovery link を組み立てる。
+/// HTML ページの `<head>` に置くと、oEmbed 対応クライアント (クローラ等) が
+/// この URL の埋め込み情報を発見できる。
+fn build_oembed_discovery_link(image_page_url: &str) -> String {
+    let encoded = percent_encode_query_value(image_page_url);
+    format!(
+        "<link rel=\"alternate\" type=\"application/json+oembed\" href=\"https://api.gyazo.com/api/oembed?url={encoded}\" title=\"Image shared with Gyazo\" />"
+    )
+}
+
+/// `<img src="..." width="..." height="..." alt="..." />` を組み立てる。
+/// `src` と `alt` は HTML 属性向けに最小限のエスケープ (`&`, `<`, `>`, `"`)
+/// を行う。`width` / `height` は数値なのでエスケープ不要。
+fn build_oembed_img_tag(src: &str, width: u64, height: u64, alt: &str) -> String {
+    format!(
+        "<img src=\"{src}\" width=\"{width}\" height=\"{height}\" alt=\"{alt}\" />",
+        src = escape_html_attribute(src),
+        alt = escape_html_attribute(alt),
+    )
+}
+
+/// URL クエリ値向けの最小 percent エンコード。RFC 3986 の unreserved
+/// 文字 (`A-Za-z0-9-._~`) 以外をすべて `%XX` に変換する。`&` や `=` も
+/// エスケープされるので、エンコード後の文字列は HTML 属性内にそのまま
+/// 埋め込んでも安全 (HTML エスケープが必要な特殊文字を含まない)。
+fn percent_encode_query_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        let unreserved = byte.is_ascii_alphanumeric()
+            || byte == b'-'
+            || byte == b'.'
+            || byte == b'_'
+            || byte == b'~';
+        if unreserved {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 fn select_image_ref(args: GyazoGetImageArgs) -> Result<String, McpError> {
@@ -220,4 +304,111 @@ fn json_result<T: serde::Serialize>(value: T) -> Result<CallToolResult, McpError
 
 fn internal_error(error: impl std::fmt::Display) -> McpError {
     McpError::internal_error(error.to_string(), None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DEFAULT_OEMBED_IMG_ALT, build_oembed_discovery_link, build_oembed_img_tag,
+        escape_html_attribute, percent_encode_query_value,
+    };
+
+    #[test]
+    fn build_oembed_img_tag_uses_url_dimensions_and_alt() {
+        let html = build_oembed_img_tag("https://i.gyazo.com/abc123.png", 640, 480, "screenshot");
+        assert_eq!(
+            html,
+            "<img src=\"https://i.gyazo.com/abc123.png\" width=\"640\" height=\"480\" alt=\"screenshot\" />"
+        );
+    }
+
+    #[test]
+    fn build_oembed_img_tag_escapes_dangerous_chars_in_alt() {
+        // alt にユーザー入力の "/<>/& が来ても属性脱出されないことを保証する。
+        let html = build_oembed_img_tag("https://i.gyazo.com/abc.png", 10, 20, r#"a"b<c>d&e"#);
+        assert!(html.contains("alt=\"a&quot;b&lt;c&gt;d&amp;e\""), "{html}");
+        // 属性を閉じる素の `"` が alt 内に残っていないこと
+        assert!(!html.contains("alt=\"a\""), "{html}");
+    }
+
+    #[test]
+    fn build_oembed_img_tag_escapes_dangerous_chars_in_src() {
+        // src は通常 Gyazo の URL なのでエスケープ不要だが、念のため & を含む
+        // クエリ付き URL でも属性脱出しないことを保証する。
+        let html = build_oembed_img_tag("https://i.gyazo.com/abc.png?a=1&b=2", 10, 20, "x");
+        assert!(
+            html.contains("src=\"https://i.gyazo.com/abc.png?a=1&amp;b=2\""),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn escape_html_attribute_handles_all_special_chars() {
+        assert_eq!(escape_html_attribute(r#"&<>"'"#), "&amp;&lt;&gt;&quot;'");
+    }
+
+    #[test]
+    fn percent_encode_query_value_encodes_non_unreserved() {
+        // Gyazo の典型的な画像ページ URL を percent-encode した結果を保証する。
+        let encoded = percent_encode_query_value("https://gyazo.com/abc123");
+        assert_eq!(encoded, "https%3A%2F%2Fgyazo.com%2Fabc123");
+    }
+
+    #[test]
+    fn percent_encode_query_value_keeps_unreserved_only() {
+        // 英数 + `-._~` だけがそのまま残ることを保証する。
+        let encoded = percent_encode_query_value("AZaz09-._~");
+        assert_eq!(encoded, "AZaz09-._~");
+    }
+
+    #[test]
+    fn default_oembed_img_alt_is_gyazo_image() {
+        // 回帰テスト: alt 引数が省略されたときに img_tag_html の alt に
+        // 入るデフォルト値が "Gyazo image" であることを保証する。
+        // ツール本体 (gyazo_get_oembed_metadata) が DEFAULT_OEMBED_IMG_ALT を
+        // 参照しているので、この定数を変えるとデフォルト alt も変わる。
+        assert_eq!(DEFAULT_OEMBED_IMG_ALT, "Gyazo image");
+
+        // デフォルト値で組み立てた img タグが期待どおりになることも確認する。
+        let html = build_oembed_img_tag(
+            "https://i.gyazo.com/abc.png",
+            10,
+            20,
+            DEFAULT_OEMBED_IMG_ALT,
+        );
+        assert!(
+            html.contains("alt=\"Gyazo image\""),
+            "デフォルト alt が img タグに反映されていません: {html}"
+        );
+    }
+
+    #[test]
+    fn build_oembed_discovery_link_matches_oembed_spec_form() {
+        // oEmbed spec 第 4 章で定義された discovery link 形式
+        // (`<link rel="alternate" type="application/json+oembed" href="..." />`)
+        // を生成していることを保証する。Gyazo docs の例とも整合する。
+        let link = build_oembed_discovery_link("https://gyazo.com/abc123");
+        assert_eq!(
+            link,
+            "<link rel=\"alternate\" type=\"application/json+oembed\" \
+             href=\"https://api.gyazo.com/api/oembed?url=https%3A%2F%2Fgyazo.com%2Fabc123\" \
+             title=\"Image shared with Gyazo\" />"
+        );
+    }
+
+    #[test]
+    fn build_oembed_discovery_link_percent_encodes_url_query_param() {
+        // image_page_url に `&` 等が含まれていても、href の query 値として
+        // 安全に埋め込まれること (& が %26 に変換され、HTML 属性脱出も
+        // 起こさないこと) を保証する。
+        let link = build_oembed_discovery_link("https://gyazo.com/abc?x=1&y=2");
+        assert!(
+            link.contains("href=\"https://api.gyazo.com/api/oembed?url=https%3A%2F%2Fgyazo.com%2Fabc%3Fx%3D1%26y%3D2\""),
+            "{link}"
+        );
+        // percent-encode 後は HTML 特殊文字が残らないので、`&amp;` への
+        // HTML エスケープは不要 (= 出力に `&amp;` も生の `&` も無い)
+        assert!(!link.contains("&amp;"), "{link}");
+        assert!(!link.contains("=1&y"), "{link}");
+    }
 }
