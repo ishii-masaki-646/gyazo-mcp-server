@@ -19,12 +19,19 @@ pub(crate) struct GyazoUserProfile {
     pub(crate) uid: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct GyazoImageMetadata {
+    #[serde(default)]
     pub(crate) app: Option<String>,
+    #[serde(default)]
     pub(crate) title: Option<String>,
+    #[serde(default)]
     pub(crate) url: Option<String>,
-    pub(crate) desc: String,
+    /// metadata が非公開もしくは存在しない場合や、明示的に null で
+    /// 返るレスポンスがあるため Option 扱い。自分画像でも空文字で来る
+    /// ことが多い。
+    #[serde(default)]
+    pub(crate) desc: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +43,10 @@ pub(crate) struct GyazoImageSummary {
     #[serde(rename = "type")]
     pub(crate) image_type: String,
     pub(crate) created_at: String,
-    pub(crate) metadata: GyazoImageMetadata,
+    /// metadata が非公開もしくは存在しない画像では、Gyazo API がこの
+    /// オブジェクトを丸ごと省略してくることがあるため Option 扱い。
+    #[serde(default)]
+    pub(crate) metadata: Option<GyazoImageMetadata>,
     /// MCP resource URI (`gyazo-mcp:///{image_id}`)。Gyazo API 側のレスポンスには
     /// 含まれないため、パース後に `populate_resource_uri()` で埋める。
     #[serde(default)]
@@ -64,7 +74,12 @@ pub(crate) struct GyazoImageDetail {
     #[serde(rename = "type")]
     pub(crate) image_type: String,
     pub(crate) created_at: String,
-    pub(crate) metadata: GyazoImageMetadata,
+    /// metadata が非公開 (`metadata_is_public: false` でアップロードされた
+    /// 画像、メタデータを含まない画像、他人がアップロードした
+    /// `access_policy: anyone` の画像など) の場合は、Gyazo API がこの
+    /// オブジェクトを丸ごと省略してくることがあるため Option 扱い。
+    #[serde(default)]
+    pub(crate) metadata: Option<GyazoImageMetadata>,
     pub(crate) ocr: Option<GyazoImageOcr>,
     /// MCP resource URI (`gyazo-mcp:///{image_id}`)。Gyazo API 側のレスポンスには
     /// 含まれないため、パース後に `populate_resource_uri()` で埋める。
@@ -376,26 +391,32 @@ pub(crate) fn extract_image_id_from_resource_uri(uri: &str) -> Result<String> {
 pub(crate) fn format_image_metadata_markdown(image: &GyazoImageDetail) -> String {
     let mut markdown = String::new();
 
-    if let Some(title) = image.metadata.title.as_deref()
+    let Some(metadata) = image.metadata.as_ref() else {
+        return markdown;
+    };
+
+    if let Some(title) = metadata.title.as_deref()
         && !title.is_empty()
     {
         markdown.push_str("### Title:\n");
         markdown.push_str(title);
         markdown.push_str("\n\n");
     }
-    if !image.metadata.desc.is_empty() {
+    if let Some(desc) = metadata.desc.as_deref()
+        && !desc.is_empty()
+    {
         markdown.push_str("### Description:\n");
-        markdown.push_str(&image.metadata.desc);
+        markdown.push_str(desc);
         markdown.push_str("\n\n");
     }
-    if let Some(app) = image.metadata.app.as_deref()
+    if let Some(app) = metadata.app.as_deref()
         && !app.is_empty()
     {
         markdown.push_str("### App:\n");
         markdown.push_str(app);
         markdown.push_str("\n\n");
     }
-    if let Some(url) = image.metadata.url.as_deref()
+    if let Some(url) = metadata.url.as_deref()
         && !url.is_empty()
     {
         markdown.push_str("### URL:\n");
@@ -633,5 +654,90 @@ mod tests {
             serialized.get("resource_uri").and_then(|v| v.as_str()),
             Some("gyazo-mcp:///def456"),
         );
+    }
+
+    /// `GET /api/images/:id` のレスポンスは、metadata が非公開
+    /// (`metadata_is_public: false` でアップロードされた画像、メタデータを
+    /// 含まない画像、他人がアップロードした `access_policy: anyone` の
+    /// 画像など) の場合、`metadata` フィールド自体を丸ごと省略してくる
+    /// ことがある。`metadata: GyazoImageMetadata` (Non-Optional) のままだと
+    /// "missing field `metadata`" でパース失敗するため、Option 化した
+    /// うえで再発防止のテストとして固定する。
+    #[test]
+    fn image_detail_parses_response_without_metadata_field() {
+        // 実際の Gyazo API レスポンス例 (metadata が含まれていないケース)
+        let api_response = json!({
+            "image_id": "65cb43fa2b8de2c8d9538cec36c8249d",
+            "type": "png",
+            "created_at": "2026-04-07T07:19:34.183Z",
+            "permalink_url": "https://gyazo.com/65cb43fa2b8de2c8d9538cec36c8249d",
+            "thumb_url": "https://thumb.gyazo.com/thumb/200/example.jpg",
+            "url": "https://i.gyazo.com/65cb43fa2b8de2c8d9538cec36c8249d.png",
+            "access_policy": "anyone"
+            // metadata と ocr は丸ごと存在しない
+        });
+
+        let detail: GyazoImageDetail = serde_json::from_value(api_response)
+            .expect("metadata 欠落のレスポンスがパースできませんでした");
+        assert!(detail.metadata.is_none(), "metadata は None として扱うべき");
+        assert!(detail.ocr.is_none());
+        assert_eq!(detail.image_id, "65cb43fa2b8de2c8d9538cec36c8249d");
+    }
+
+    /// `metadata` オブジェクトはあるが、内部の各フィールドが部分的に
+    /// 欠落 / null のケースもパースできることを保証する。
+    #[test]
+    fn image_detail_parses_response_with_partial_metadata_fields() {
+        // app だけある、他は無いケース
+        let api_response = json!({
+            "image_id": "abc",
+            "type": "png",
+            "created_at": "2026-04-09T00:00:00Z",
+            "permalink_url": "https://gyazo.com/abc",
+            "thumb_url": "https://i.gyazo.com/thumb/abc.png",
+            "url": "https://i.gyazo.com/abc.png",
+            "metadata": {
+                "app": "Gyazo"
+                // title / url / desc は欠落
+            }
+        });
+
+        let detail: GyazoImageDetail = serde_json::from_value(api_response)
+            .expect("部分的な metadata のレスポンスがパースできませんでした");
+        let metadata = detail.metadata.expect("metadata は Some であるべき");
+        assert_eq!(metadata.app.as_deref(), Some("Gyazo"));
+        assert!(metadata.title.is_none());
+        assert!(metadata.url.is_none());
+        assert!(metadata.desc.is_none());
+    }
+
+    /// `metadata` の各フィールドが明示的に `null` で来ているケース
+    /// (例: `desc` が null)。`desc: String` (Non-Optional) のままだと
+    /// null でパース失敗するため、各フィールドを `Option<String>` 化
+    /// したうえで再発防止のテストとして固定する。
+    #[test]
+    fn image_detail_parses_response_with_null_metadata_fields() {
+        let api_response = json!({
+            "image_id": "abc",
+            "type": "png",
+            "created_at": "2026-04-09T00:00:00Z",
+            "permalink_url": "https://gyazo.com/abc",
+            "thumb_url": "https://i.gyazo.com/thumb/abc.png",
+            "url": "https://i.gyazo.com/abc.png",
+            "metadata": {
+                "app": null,
+                "title": null,
+                "url": null,
+                "desc": null
+            }
+        });
+
+        let detail: GyazoImageDetail = serde_json::from_value(api_response)
+            .expect("null フィールド入りの metadata がパースできませんでした");
+        let metadata = detail.metadata.expect("metadata は Some であるべき");
+        assert!(metadata.app.is_none());
+        assert!(metadata.title.is_none());
+        assert!(metadata.url.is_none());
+        assert!(metadata.desc.is_none());
     }
 }
