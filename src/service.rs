@@ -138,7 +138,24 @@ pub(crate) fn status() -> Result<()> {
     bail!("この OS ではサービスの自動登録に対応していません。手動でサービス設定を行ってください。");
 }
 
-pub(crate) fn start() -> Result<()> {
+pub(crate) fn start(tcp_port: u16) -> Result<()> {
+    let _ = tcp_port; // Linux / macOS では未使用
+
+    // 対応 OS では冪等化: 既に起動中と確定したら起動処理をスキップして
+    // 案内を表示する。判定不能 (`Unknown`) の場合は OS 別ロジックへ流して
+    // 本来のエラーを返させる。
+    // 非対応 OS では `is_running_impl` が定義されていないためガードしない
+    // (後段の `bail!` に到達させる)。
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    {
+        ensure_installed()?;
+        if is_running(tcp_port) == RunState::Running {
+            println!("サービスは既に起動しています。");
+            println!("  状態確認: gyazo-mcp-server service status");
+            return Ok(());
+        }
+    }
+
     #[cfg(target_os = "linux")]
     return start_systemd();
 
@@ -155,6 +172,19 @@ pub(crate) fn start() -> Result<()> {
 pub(crate) fn stop(tcp_port: u16) -> Result<()> {
     let _ = tcp_port; // Linux / macOS では未使用
 
+    // 対応 OS では冪等化: 既に停止中と確定したら停止処理をスキップして
+    // 案内を表示する。判定不能 (`Unknown`) の場合は OS 別ロジックへ流して
+    // 本来のエラーを返させる。
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    {
+        ensure_installed()?;
+        if is_running(tcp_port) == RunState::Stopped {
+            println!("サービスは既に停止しています。");
+            println!("  状態確認: gyazo-mcp-server service status");
+            return Ok(());
+        }
+    }
+
     #[cfg(target_os = "linux")]
     return stop_systemd();
 
@@ -170,6 +200,17 @@ pub(crate) fn stop(tcp_port: u16) -> Result<()> {
 
 pub(crate) fn restart(tcp_port: u16) -> Result<()> {
     let _ = tcp_port;
+
+    // 対応 OS では冪等化: 停止中と確定した場合のみ「起動のみ」案内を出す。
+    // 判定不能 (`Unknown`) の場合は何もせず OS 別ロジックへ流して
+    // 本来のエラーを返させる。
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    {
+        ensure_installed()?;
+        if is_running(tcp_port) == RunState::Stopped {
+            println!("サービスは停止しています。起動のみ実行します。");
+        }
+    }
 
     #[cfg(target_os = "linux")]
     return restart_systemd();
@@ -196,6 +237,113 @@ fn ensure_installed() -> Result<()> {
 /// 検出できない環境では false を返す。
 pub(crate) fn is_installed() -> bool {
     is_installed_impl()
+}
+
+/// サービスの実行状態。`Unknown` は判定不能 (環境エラー、コマンド失敗等) を
+/// 表す。冪等ガードでは `Running` / `Stopped` の確定状態のときだけスキップし、
+/// `Unknown` は従来どおり OS 別ロジックへ流して本来のエラーを返させる。
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunState {
+    Running,
+    Stopped,
+    Unknown,
+}
+
+/// サービス (HTTP transport) の実行状態を返す。
+///
+/// `tcp_port` は Windows でのみ使用 (TCP listen を起点にプロセスを特定するため)。
+/// Linux / macOS では未使用。
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn is_running(tcp_port: u16) -> RunState {
+    let _ = tcp_port;
+    is_running_impl(tcp_port)
+}
+
+#[cfg(target_os = "linux")]
+fn is_running_impl(_tcp_port: u16) -> RunState {
+    // systemctl is-active --quiet の終了コード:
+    //   0 = active (Running)
+    //   3 = inactive / failed (Stopped)
+    //   その他 = 状態不明 (環境エラー、unit 不在、systemctl 自体の失敗等)
+    let Ok(status) = Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", SERVICE_NAME])
+        .status()
+    else {
+        return RunState::Unknown;
+    };
+    match status.code() {
+        Some(0) => RunState::Running,
+        Some(3) => RunState::Stopped,
+        _ => RunState::Unknown,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn is_running_impl(_tcp_port: u16) -> RunState {
+    // 引数なしの `launchctl list` は、ロード済みのジョブをタブ区切りで返す:
+    //
+    //     PID	Status	Label
+    //     12345	0	com.gyazo.mcp-server
+    //     -	0	com.other.service
+    //
+    // PID 列が `-` ならロード済みだが現在実行中ではない (= 停止中)。
+    // 数値ならその PID で実行中 (= 起動中)。一覧自体に label が無ければ
+    // 未ロード (= 停止中)。
+    //
+    // `launchctl list <label>` の per-label 呼び出しは未ロード時に
+    // 非 0 終了するため、判定不能と未ロードの区別が難しい。引数なしの
+    // `launchctl list` は launchctl 自体が動けば常に成功するので、
+    // 「launchctl 自体の失敗」と「未ロード = 停止中」を確実に分けられる。
+    let Ok(output) = Command::new("launchctl").arg("list").output() else {
+        return RunState::Unknown;
+    };
+    if !output.status.success() {
+        return RunState::Unknown;
+    }
+    let label = launchd_label();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().skip(1) {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() >= 3 && cols[2] == label {
+            return if cols[0] != "-" {
+                RunState::Running
+            } else {
+                RunState::Stopped
+            };
+        }
+    }
+    // 一覧に無い = 未ロード = 停止中
+    RunState::Stopped
+}
+
+#[cfg(target_os = "windows")]
+fn is_running_impl(tcp_port: u16) -> RunState {
+    // 設定 TCP ポートを listen している `gyazo-mcp-server` プロセスがいれば
+    // 実行中とみなす。stop と同じ判定方針 (port-listen + ProcessName 検証)。
+    //
+    // 終了コード:
+    //   0 = Running (gyazo-mcp-server が listen している)
+    //   2 = Stopped (listener が居ない、または listener が別プロセス)
+    //   その他 = Unknown (PowerShell 自体の失敗等)
+    let command = format!(
+        "$conn = Get-NetTCPConnection -LocalPort {tcp_port} -State Listen \
+            -ErrorAction SilentlyContinue | Select-Object -First 1; \
+         if (-not $conn) {{ exit 2 }} \
+         $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue; \
+         if ($proc -and $proc.ProcessName -eq 'gyazo-mcp-server') {{ exit 0 }} else {{ exit 2 }}"
+    );
+    let Ok(status) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
+        .status()
+    else {
+        return RunState::Unknown;
+    };
+    match status.code() {
+        Some(0) => RunState::Running,
+        Some(2) => RunState::Stopped,
+        _ => RunState::Unknown,
+    }
 }
 
 #[cfg(target_os = "linux")]

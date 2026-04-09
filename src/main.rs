@@ -265,25 +265,26 @@ fn run_service_command(args: ServiceArgs) -> Result<()> {
         ServiceCommand::Install => service::install(),
         ServiceCommand::Uninstall => service::uninstall(),
         ServiceCommand::Status => service::status(),
-        ServiceCommand::Start => service::start(),
-        ServiceCommand::Stop => service::stop(service_stop_port_hint()?),
-        ServiceCommand::Restart => service::restart(service_stop_port_hint()?),
+        ServiceCommand::Start => service::start(service_runtime_port_hint()?),
+        ServiceCommand::Stop => service::stop(service_runtime_port_hint()?),
+        ServiceCommand::Restart => service::restart(service_runtime_port_hint()?),
     }
 }
 
-/// `service stop` / `service restart` の停止対象を TCP ポートから特定する
-/// ためのポート番号を返す。Windows でのみ runtime config を読む必要がある。
-/// 非 Windows では `service::stop` / `service::restart` がポートを参照しない
-/// ため、`RuntimeConfig::load()` を呼ばずにダミー値を返すことで、
-/// `service` 系コマンドの「壊れた config でも救済に使える」前提を維持する。
+/// `service start` / `service stop` / `service restart` の判定対象を TCP ポート
+/// から特定するためのポート番号を返す。Windows でのみ runtime config を読む
+/// 必要がある。非 Windows では `service::start` / `service::stop` /
+/// `service::restart` がポートを参照しないため、`RuntimeConfig::load()` を
+/// 呼ばずにダミー値を返すことで、`service` 系コマンドの「壊れた config でも
+/// 救済に使える」前提を維持する。
 #[cfg(target_os = "windows")]
-fn service_stop_port_hint() -> Result<u16> {
+fn service_runtime_port_hint() -> Result<u16> {
     load_env_files()?;
     Ok(RuntimeConfig::load()?.tcp_port())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn service_stop_port_hint() -> Result<u16> {
+fn service_runtime_port_hint() -> Result<u16> {
     Ok(0)
 }
 
@@ -413,23 +414,23 @@ mod tests {
 
     use super::{
         complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome,
-        service_stop_port_hint,
+        service_runtime_port_hint,
     };
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn service_stop_port_hint_does_not_load_runtime_config_on_unix() {
+    fn service_runtime_port_hint_does_not_load_runtime_config_on_unix() {
         // 回帰テスト:
         // `service` 系コマンドは RuntimeConfig::load() より前に動かせる前提で
         // 設計されている (壊れた config.toml でも install/uninstall/status で
         // 復旧できるようにするため)。Windows の停止対象特定で導入した
-        // service_stop_port_hint() が、非 Windows で RuntimeConfig::load() を
+        // service_runtime_port_hint() が、非 Windows で RuntimeConfig::load() を
         // 呼ぶ実装に回帰すると、この前提が壊れる。
         //
         // ここでは GYAZO_MCP_CONFIG_DIR を実在しない壊れたパスに向けても
-        // service_stop_port_hint() が成功し、ダミー値 0 を返すことを保証する。
+        // service_runtime_port_hint() が成功し、ダミー値 0 を返すことを保証する。
         // (環境変数を触るので #[test] は直列化が必要なケースもあるが、
-        // service_stop_port_hint の動作を変えずに完結するため副作用は閉じる)
+        // service_runtime_port_hint の動作を変えずに完結するため副作用は閉じる)
         let prev = std::env::var("GYAZO_MCP_CONFIG_DIR").ok();
         // Safety: テスト用の一時上書き
         unsafe {
@@ -439,7 +440,7 @@ mod tests {
             );
         }
 
-        let result = service_stop_port_hint();
+        let result = service_runtime_port_hint();
 
         // 後始末
         unsafe {
@@ -451,7 +452,7 @@ mod tests {
 
         assert!(
             result.is_ok(),
-            "非 Windows で service_stop_port_hint が失敗しました: {result:?}"
+            "非 Windows で service_runtime_port_hint が失敗しました: {result:?}"
         );
         assert_eq!(
             result.unwrap(),
