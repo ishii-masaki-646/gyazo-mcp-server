@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-04-09
 
 - `service` サブコマンドに `start` / `stop` / `restart` を追加しました。Linux は `systemctl --user start/stop/restart`、macOS は `launchctl load`/`unload` を経由してサービスを操作します。Windows は `schtasks /Run` で起動し、停止は `Get-NetTCPConnection -LocalPort <tcp_port> -State Listen` から OwningProcess の PID を取得し、その PID が `gyazo-mcp-server` であることを確認したうえで `Stop-Process -Id` で停止します。タスクスケジューラから `Start-Process` で本体を切り離して起動しているため `schtasks /End` ではラッパー PowerShell しか止められず、また `Get-Process -Name` ではサービス対象でない stdio モード等まで巻き込むため、`tcp_port` を listen しているプロセスを起点に厳密に特定する方式にしています。
 - Windows の `service install` / `service uninstall` / `service status` で日本語等の非 ASCII 出力が文字化けする不具合を修正しました。生成する `.ps1` の先頭で `[Console]::OutputEncoding` と `$OutputEncoding` を UTF-8 に固定し、`service status` の `schtasks.exe` 呼び出しも PowerShell 経由で UTF-8 化してから受け取るようにしました。Windows PowerShell 5.x の標準出力が既定で OEM コードページ (日本語環境では CP932) になるため、Rust 側で UTF-8 として読むと文字化けしていました。
