@@ -5,6 +5,7 @@ use inquire::Confirm;
 
 use crate::auth::{config as auth_config, paths};
 
+#[cfg(target_os = "linux")]
 const SERVICE_NAME: &str = "gyazo-mcp-server";
 
 pub(crate) fn install() -> Result<()> {
