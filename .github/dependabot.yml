@@ -1,0 +1,13 @@
+# GitHub Actions の更新を Dependabot で追跡する。
+# 新しい安定版が出たら自動で PR を作成し、現状の手動 bump 運用 (見落とし) を防ぐ。
+# 参考: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(actions)
