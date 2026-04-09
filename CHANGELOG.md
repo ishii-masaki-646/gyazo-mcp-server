@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 - 2026-04-09
+
+- `gyazo_get_image` で metadata が非公開もしくは存在しない画像 (`metadata_is_public: false` でアップロードされた画像、メタデータを含まない画像、`access_policy: anyone` の他人画像など) を取得しようとすると `Gyazo image detail のレスポンスを解析できませんでした` エラーで失敗する不具合を修正しました。Gyazo API はこの種のレスポンスから `metadata` フィールドを丸ごと省略してくることがあり、`GyazoImageDetail.metadata` が Non-Optional だったため serde が `missing field metadata` でパース失敗していました (本不具合は 0.6.0 で混入したものではなく、初期実装から存在していたバグです)。`GyazoImageDetail.metadata` および `GyazoImageSummary.metadata` を `Option<GyazoImageMetadata>` に変更し、`GyazoImageMetadata` の各フィールド (`app` / `title` / `url` / `desc`) もすべて `#[serde(default)]` 付きの `Option<String>` に揃えて、フィールド欠落 / 明示 null どちらでもパースできるようにしました。再発防止テストとして「metadata 丸ごと欠落」「metadata あり + 各フィールド部分欠落」「metadata あり + 各フィールド明示 null」の 3 ケースを追加しています。
+
 ## 0.6.0 - 2026-04-09
 
 - `service` サブコマンドに `start` / `stop` / `restart` を追加しました。Linux は `systemctl --user start/stop/restart`、macOS は `launchctl load`/`unload` を経由してサービスを操作します。Windows は `schtasks /Run` で起動し、停止は `Get-NetTCPConnection -LocalPort <tcp_port> -State Listen` から OwningProcess の PID を取得し、その PID が `gyazo-mcp-server` であることを確認したうえで `Stop-Process -Id` で停止します。タスクスケジューラから `Start-Process` で本体を切り離して起動しているため `schtasks /End` ではラッパー PowerShell しか止められず、また `Get-Process -Name` ではサービス対象でない stdio モード等まで巻き込むため、`tcp_port` を listen しているプロセスを起点に厳密に特定する方式にしています。

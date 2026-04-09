@@ -117,7 +117,8 @@ impl ServerHandler for GyazoServer {
                         uri: create_image_resource_uri(&image.image_id),
                         name: image
                             .metadata
-                            .title
+                            .as_ref()
+                            .and_then(|m| m.title.clone())
                             .unwrap_or_else(|| image.image_id.clone()),
                         title: None,
                         description: None,
