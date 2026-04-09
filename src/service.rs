@@ -411,6 +411,16 @@ fn scripts_dir() -> Result<PathBuf> {
     paths::config_dir().ok_or_else(|| anyhow::anyhow!("設定ディレクトリを特定できませんでした"))
 }
 
+/// Windows PowerShell 5.x が生成する標準出力の文字コードを UTF-8 に固定する
+/// プレリュード。Rust 側で `String::from_utf8_lossy` する前提なので、これを
+/// 仕込まないと OEM コードページ (日本語環境では CP932) で書き出されて
+/// 文字化けする。`.ps1` 自体は BOM 付き UTF-8 で書き出している。
+#[cfg(target_os = "windows")]
+fn ps1_utf8_prelude() -> &'static str {
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n\
+     $OutputEncoding = [System.Text.Encoding]::UTF8\n"
+}
+
 #[cfg(target_os = "windows")]
 fn generate_install_ps1(binary: &std::path::Path) -> String {
     // タスクスケジューラから直接 EXE を起動するとフォアグラウンドのコンソール
@@ -418,8 +428,9 @@ fn generate_install_ps1(binary: &std::path::Path) -> String {
     // さらに `Start-Process -WindowStyle Hidden` を呼んでバックグラウンドに回す。
     // PowerShell の文字列リテラル中のダブルクォートは `""` でエスケープする。
     let task = task_name();
+    let prelude = ps1_utf8_prelude();
     format!(
-        r#"$action = New-ScheduledTaskAction `
+        r#"{prelude}$action = New-ScheduledTaskAction `
   -Execute "powershell.exe" `
   -Argument "-WindowStyle Hidden -Command ""Start-Process -WindowStyle Hidden -FilePath '{binary}'"""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -434,8 +445,9 @@ Write-Host 'タスク "{task}" を登録しました。'
 #[cfg(target_os = "windows")]
 fn generate_uninstall_ps1() -> String {
     let task = task_name();
+    let prelude = ps1_utf8_prelude();
     format!(
-        r#"Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false
+        r#"{prelude}Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false
 Write-Host 'タスク "{task}" を解除しました。'
 "#,
     )
@@ -523,9 +535,17 @@ fn uninstall_windows_task() -> Result<()> {
 
 #[cfg(target_os = "windows")]
 fn status_windows_task() -> Result<()> {
+    // schtasks.exe の出力は OEM コードページ (日本語環境では CP932) なので、
+    // Rust 側で UTF-8 として読むと文字化けする。PowerShell 経由で
+    // `[Console]::OutputEncoding` を UTF-8 に固定してから schtasks を起動し、
+    // 標準出力を UTF-8 で受け取る。
     let task = task_name();
-    let output = Command::new("schtasks")
-        .args(["/Query", "/TN", task, "/FO", "LIST", "/V"])
+    let command = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         schtasks.exe /Query /TN '{task}' /FO LIST /V"
+    );
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
         .output()
         .context("schtasks の実行に失敗しました")?;
 
@@ -636,6 +656,26 @@ mod tests {
     fn uninstall_ps1_contains_task_name() {
         let ps1 = generate_uninstall_ps1();
         assert!(ps1.contains(task_name()));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn generated_ps1_sets_utf8_output_encoding() {
+        // Windows PowerShell 5.x の標準出力は既定で OEM コードページなので、
+        // Rust 側で UTF-8 として読むと文字化けする。生成スクリプトの先頭で
+        // `[Console]::OutputEncoding` を UTF-8 に固定していることを保証する。
+        let install = generate_install_ps1(&PathBuf::from(r"C:\bin\gyazo-mcp-server.exe"));
+        let uninstall = generate_uninstall_ps1();
+        for (label, ps1) in [("install", &install), ("uninstall", &uninstall)] {
+            assert!(
+                ps1.contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8"),
+                "{label} ps1 に Console::OutputEncoding の UTF-8 化が含まれていません"
+            );
+            assert!(
+                ps1.contains("$OutputEncoding = [System.Text.Encoding]::UTF8"),
+                "{label} ps1 に $OutputEncoding の UTF-8 化が含まれていません"
+            );
+        }
     }
 
     #[cfg(target_os = "windows")]

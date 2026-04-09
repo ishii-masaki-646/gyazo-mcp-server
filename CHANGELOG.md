@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Windows の `service install` / `service uninstall` / `service status` で日本語等の非 ASCII 出力が文字化けする不具合を修正しました。生成する `.ps1` の先頭で `[Console]::OutputEncoding` と `$OutputEncoding` を UTF-8 に固定し、`service status` の `schtasks.exe` 呼び出しも PowerShell 経由で UTF-8 化してから受け取るようにしました。Windows PowerShell 5.x の標準出力が既定で OEM コードページ (日本語環境では CP932) になるため、Rust 側で UTF-8 として読むと文字化けしていました。
+
 ## 0.5.1 - 2026-04-06
 
 - 動的に登録された OAuth クライアント情報 (`registered_clients`) を `mcp_sessions.toml` に永続化するようにしました。サーバー再起動後に MCP クライアント側が OAuth 再検証フローに入ると `client_id` が未登録扱いになり、再認証ループに陥っていた不具合を解消しました。既存の `mcp_sessions.toml` は `#[serde(default)]` により後方互換のまま読み込めます。
