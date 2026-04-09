@@ -75,7 +75,9 @@ impl GyazoServer {
         }))
     }
 
-    #[rmcp::tool(description = "現在の Gyazo ユーザーがアップロードしたキャプチャを全文検索します")]
+    #[rmcp::tool(
+        description = "現在の Gyazo ユーザーがアップロードしたキャプチャを全文検索します。各画像の戻り値に含まれる resource_uri (gyazo-mcp:///{image_id}) を MCP read_resource に渡すと、画像本体のバイナリを取得できます。"
+    )]
     async fn gyazo_search(
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,
@@ -89,7 +91,9 @@ impl GyazoServer {
         json_result(images)
     }
 
-    #[rmcp::tool(description = "認証済みユーザーの Gyazo 画像一覧を取得します")]
+    #[rmcp::tool(
+        description = "認証済みユーザーの Gyazo 画像一覧を取得します。各画像の戻り値に含まれる resource_uri (gyazo-mcp:///{image_id}) を MCP read_resource に渡すと、画像本体のバイナリを取得できます。"
+    )]
     async fn gyazo_list_images(
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,
@@ -103,7 +107,9 @@ impl GyazoServer {
         json_result(images)
     }
 
-    #[rmcp::tool(description = "画像 ID または Gyazo URL を指定して 1 件の画像を取得します")]
+    #[rmcp::tool(
+        description = "画像 ID または Gyazo URL を指定して 1 件の画像を取得します。戻り値に含まれる resource_uri (gyazo-mcp:///{image_id}) を MCP read_resource に渡すと、画像本体のバイナリを取得できます。"
+    )]
     async fn gyazo_get_image(
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,
@@ -133,7 +139,9 @@ impl GyazoServer {
         json_result(deleted)
     }
 
-    #[rmcp::tool(description = "最新の Gyazo 画像を画像本体とメタデータ付きで取得します")]
+    #[rmcp::tool(
+        description = "最新の Gyazo 画像を画像本体とメタデータ付きで取得します。戻り値のメタデータには resource_uri (gyazo-mcp:///{image_id}) も含まれ、後から MCP read_resource に渡すことで画像本体のバイナリを再取得できます。"
+    )]
     async fn gyazo_get_latest_image(
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,

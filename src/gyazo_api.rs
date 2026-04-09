@@ -37,6 +37,16 @@ pub(crate) struct GyazoImageSummary {
     pub(crate) image_type: String,
     pub(crate) created_at: String,
     pub(crate) metadata: GyazoImageMetadata,
+    /// MCP resource URI (`gyazo-mcp:///{image_id}`)。Gyazo API 側のレスポンスには
+    /// 含まれないため、パース後に `populate_resource_uri()` で埋める。
+    #[serde(default)]
+    pub(crate) resource_uri: String,
+}
+
+impl GyazoImageSummary {
+    fn populate_resource_uri(&mut self) {
+        self.resource_uri = create_image_resource_uri(&self.image_id);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +66,16 @@ pub(crate) struct GyazoImageDetail {
     pub(crate) created_at: String,
     pub(crate) metadata: GyazoImageMetadata,
     pub(crate) ocr: Option<GyazoImageOcr>,
+    /// MCP resource URI (`gyazo-mcp:///{image_id}`)。Gyazo API 側のレスポンスには
+    /// 含まれないため、パース後に `populate_resource_uri()` で埋める。
+    #[serde(default)]
+    pub(crate) resource_uri: String,
+}
+
+impl GyazoImageDetail {
+    fn populate_resource_uri(&mut self) {
+        self.resource_uri = create_image_resource_uri(&self.image_id);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -148,8 +168,11 @@ pub(crate) async fn list_images(
         .await
         .context("Gyazo images list endpoint の呼び出しに失敗しました")?;
     let headers = response.headers().clone();
-    let images =
+    let mut images =
         parse_json_response::<Vec<GyazoImageSummary>>(response, "Gyazo images list").await?;
+    for image in &mut images {
+        image.populate_resource_uri();
+    }
 
     Ok(GyazoImageListResult {
         total_count: header_u64(&headers, "X-Total-Count"),
@@ -169,7 +192,10 @@ pub(crate) async fn get_image(access_token: &str, image_ref: &str) -> Result<Gya
         .await
         .context("Gyazo image detail endpoint の呼び出しに失敗しました")?;
 
-    parse_json_response::<GyazoImageDetail>(response, "Gyazo image detail").await
+    let mut detail =
+        parse_json_response::<GyazoImageDetail>(response, "Gyazo image detail").await?;
+    detail.populate_resource_uri();
+    Ok(detail)
 }
 
 pub(crate) async fn delete_image(
@@ -237,7 +263,11 @@ pub(crate) async fn search_images(
         );
     }
 
-    parse_json_response::<Vec<GyazoImageDetail>>(response, "Gyazo search").await
+    let mut images = parse_json_response::<Vec<GyazoImageDetail>>(response, "Gyazo search").await?;
+    for image in &mut images {
+        image.populate_resource_uri();
+    }
+    Ok(images)
 }
 
 pub(crate) async fn upload_image(
@@ -481,9 +511,11 @@ fn guess_mime_type_from_url(image_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::{
-        create_image_resource_uri, decode_image_data, extract_image_id_from_resource_uri,
-        guess_mime_type_from_url, normalize_image_id,
+        GyazoImageDetail, GyazoImageSummary, create_image_resource_uri, decode_image_data,
+        extract_image_id_from_resource_uri, guess_mime_type_from_url, normalize_image_id,
     };
 
     #[test]
@@ -530,5 +562,76 @@ mod tests {
         assert_eq!(uri, "gyazo-mcp:///abc123");
         let image_id = extract_image_id_from_resource_uri(&uri).unwrap();
         assert_eq!(image_id, "abc123");
+    }
+
+    /// Gyazo API のレスポンスサンプル (resource_uri を含まない) をデシリアライズし、
+    /// `populate_resource_uri()` 後にシリアライズすると `gyazo-mcp:///{image_id}`
+    /// が乗ることを保証する回帰テスト。`#[serde(default)]` の欠落や、
+    /// `populate_resource_uri()` の呼び忘れに気付けるようにする。
+    #[test]
+    fn image_summary_populates_resource_uri() {
+        let api_response = json!({
+            "image_id": "abc123",
+            "permalink_url": "https://gyazo.com/abc123",
+            "thumb_url": "https://i.gyazo.com/thumb/abc123.png",
+            "url": "https://i.gyazo.com/abc123.png",
+            "type": "png",
+            "created_at": "2026-04-09T00:00:00+0900",
+            "metadata": {
+                "app": null,
+                "title": null,
+                "url": null,
+                "desc": ""
+            }
+        });
+
+        let mut summary: GyazoImageSummary =
+            serde_json::from_value(api_response).expect("API レスポンスのパースに失敗");
+        assert_eq!(
+            summary.resource_uri, "",
+            "API レスポンスに resource_uri が無いので初期状態は空のはず"
+        );
+
+        summary.populate_resource_uri();
+        assert_eq!(summary.resource_uri, "gyazo-mcp:///abc123");
+
+        let serialized = serde_json::to_value(&summary).unwrap();
+        assert_eq!(
+            serialized.get("resource_uri").and_then(|v| v.as_str()),
+            Some("gyazo-mcp:///abc123"),
+            "シリアライズ結果に resource_uri が含まれていません"
+        );
+    }
+
+    #[test]
+    fn image_detail_populates_resource_uri() {
+        let api_response = json!({
+            "image_id": "def456",
+            "permalink_url": "https://gyazo.com/def456",
+            "thumb_url": "https://i.gyazo.com/thumb/def456.png",
+            "url": "https://i.gyazo.com/def456.png",
+            "type": "png",
+            "created_at": "2026-04-09T00:00:00+0900",
+            "metadata": {
+                "app": null,
+                "title": null,
+                "url": null,
+                "desc": ""
+            },
+            "ocr": null
+        });
+
+        let mut detail: GyazoImageDetail =
+            serde_json::from_value(api_response).expect("API レスポンスのパースに失敗");
+        assert_eq!(detail.resource_uri, "");
+
+        detail.populate_resource_uri();
+        assert_eq!(detail.resource_uri, "gyazo-mcp:///def456");
+
+        let serialized = serde_json::to_value(&detail).unwrap();
+        assert_eq!(
+            serialized.get("resource_uri").and_then(|v| v.as_str()),
+            Some("gyazo-mcp:///def456"),
+        );
     }
 }
