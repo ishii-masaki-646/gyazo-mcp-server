@@ -265,7 +265,26 @@ fn run_service_command(args: ServiceArgs) -> Result<()> {
         ServiceCommand::Install => service::install(),
         ServiceCommand::Uninstall => service::uninstall(),
         ServiceCommand::Status => service::status(),
+        ServiceCommand::Start => service::start(),
+        ServiceCommand::Stop => service::stop(service_stop_port_hint()?),
+        ServiceCommand::Restart => service::restart(service_stop_port_hint()?),
     }
+}
+
+/// `service stop` / `service restart` の停止対象を TCP ポートから特定する
+/// ためのポート番号を返す。Windows でのみ runtime config を読む必要がある。
+/// 非 Windows では `service::stop` / `service::restart` がポートを参照しない
+/// ため、`RuntimeConfig::load()` を呼ばずにダミー値を返すことで、
+/// `service` 系コマンドの「壊れた config でも救済に使える」前提を維持する。
+#[cfg(target_os = "windows")]
+fn service_stop_port_hint() -> Result<u16> {
+    load_env_files()?;
+    Ok(RuntimeConfig::load()?.tcp_port())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn service_stop_port_hint() -> Result<u16> {
+    Ok(0)
 }
 
 async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
@@ -392,7 +411,54 @@ mod tests {
     use axum::http::StatusCode;
     use tokio::time::timeout;
 
-    use super::{complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome};
+    use super::{
+        complete_direct_auth, direct_auth_response_parts, finalize_stdio_auth_outcome,
+        service_stop_port_hint,
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn service_stop_port_hint_does_not_load_runtime_config_on_unix() {
+        // 回帰テスト:
+        // `service` 系コマンドは RuntimeConfig::load() より前に動かせる前提で
+        // 設計されている (壊れた config.toml でも install/uninstall/status で
+        // 復旧できるようにするため)。Windows の停止対象特定で導入した
+        // service_stop_port_hint() が、非 Windows で RuntimeConfig::load() を
+        // 呼ぶ実装に回帰すると、この前提が壊れる。
+        //
+        // ここでは GYAZO_MCP_CONFIG_DIR を実在しない壊れたパスに向けても
+        // service_stop_port_hint() が成功し、ダミー値 0 を返すことを保証する。
+        // (環境変数を触るので #[test] は直列化が必要なケースもあるが、
+        // service_stop_port_hint の動作を変えずに完結するため副作用は閉じる)
+        let prev = std::env::var("GYAZO_MCP_CONFIG_DIR").ok();
+        // Safety: テスト用の一時上書き
+        unsafe {
+            std::env::set_var(
+                "GYAZO_MCP_CONFIG_DIR",
+                "/nonexistent/gyazo-mcp-server-broken-path-for-test",
+            );
+        }
+
+        let result = service_stop_port_hint();
+
+        // 後始末
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("GYAZO_MCP_CONFIG_DIR", v),
+                None => std::env::remove_var("GYAZO_MCP_CONFIG_DIR"),
+            }
+        }
+
+        assert!(
+            result.is_ok(),
+            "非 Windows で service_stop_port_hint が失敗しました: {result:?}"
+        );
+        assert_eq!(
+            result.unwrap(),
+            0,
+            "非 Windows ではポートは未使用なのでダミー値 0 を返すべきです"
+        );
+    }
 
     #[test]
     fn direct_auth_response_parts_returns_ok_for_success() {

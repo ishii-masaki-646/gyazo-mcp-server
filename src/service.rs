@@ -112,6 +112,60 @@ pub(crate) fn status() -> Result<()> {
     bail!("この OS ではサービスの自動登録に対応していません。手動でサービス設定を行ってください。");
 }
 
+pub(crate) fn start() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    return start_systemd();
+
+    #[cfg(target_os = "macos")]
+    return start_launchd();
+
+    #[cfg(target_os = "windows")]
+    return start_windows_task();
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    bail!("この OS ではサービスの自動登録に対応していません。手動でサービス設定を行ってください。");
+}
+
+pub(crate) fn stop(tcp_port: u16) -> Result<()> {
+    let _ = tcp_port; // Linux / macOS では未使用
+
+    #[cfg(target_os = "linux")]
+    return stop_systemd();
+
+    #[cfg(target_os = "macos")]
+    return stop_launchd();
+
+    #[cfg(target_os = "windows")]
+    return stop_windows_task(tcp_port);
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    bail!("この OS ではサービスの自動登録に対応していません。手動でサービス設定を行ってください。");
+}
+
+pub(crate) fn restart(tcp_port: u16) -> Result<()> {
+    let _ = tcp_port;
+
+    #[cfg(target_os = "linux")]
+    return restart_systemd();
+
+    #[cfg(target_os = "macos")]
+    return restart_launchd();
+
+    #[cfg(target_os = "windows")]
+    return restart_windows_task(tcp_port);
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    bail!("この OS ではサービスの自動登録に対応していません。手動でサービス設定を行ってください。");
+}
+
+/// サービスが未登録の場合に共通のヒント付きエラーを返す。
+fn ensure_installed() -> Result<()> {
+    if !is_installed() {
+        bail!("サービスが登録されていません。\n  登録: gyazo-mcp-server service install");
+    }
+    Ok(())
+}
+
 /// サービスが登録済みかどうかを返す。
 /// 検出できない環境では false を返す。
 pub(crate) fn is_installed() -> bool {
@@ -284,6 +338,39 @@ fn status_systemd() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn start_systemd() -> Result<()> {
+    ensure_installed()?;
+    if !has_systemd_user_manager() {
+        bail!("systemd の user manager が利用できません。");
+    }
+    run_command("systemctl", &["--user", "start", SERVICE_NAME])?;
+    println!("サービスを起動しました。");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn stop_systemd() -> Result<()> {
+    ensure_installed()?;
+    if !has_systemd_user_manager() {
+        bail!("systemd の user manager が利用できません。");
+    }
+    run_command("systemctl", &["--user", "stop", SERVICE_NAME])?;
+    println!("サービスを停止しました。");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn restart_systemd() -> Result<()> {
+    ensure_installed()?;
+    if !has_systemd_user_manager() {
+        bail!("systemd の user manager が利用できません。");
+    }
+    run_command("systemctl", &["--user", "restart", SERVICE_NAME])?;
+    println!("サービスを再起動しました。");
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // macOS (launchd)
 // ---------------------------------------------------------------------------
@@ -394,6 +481,36 @@ fn status_launchd() -> Result<()> {
         println!("サービスは登録されていますが、現在実行されていません。");
         println!("  plist: {}", plist_path.display());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn start_launchd() -> Result<()> {
+    ensure_installed()?;
+    let plist_path = launchd_plist_path()?;
+    // 既に load 済みでも冪等にしたいので、エラーは無視せず bail
+    run_command("launchctl", &["load", &plist_path.display().to_string()])?;
+    println!("サービスを起動しました。");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn stop_launchd() -> Result<()> {
+    ensure_installed()?;
+    let plist_path = launchd_plist_path()?;
+    run_command("launchctl", &["unload", &plist_path.display().to_string()])?;
+    println!("サービスを停止しました。");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn restart_launchd() -> Result<()> {
+    ensure_installed()?;
+    let plist_path = launchd_plist_path()?;
+    // unload は既に停止していると失敗するので無視。load の方は失敗を伝える。
+    let _ = run_command("launchctl", &["unload", &plist_path.display().to_string()]);
+    run_command("launchctl", &["load", &plist_path.display().to_string()])?;
+    println!("サービスを再起動しました。");
     Ok(())
 }
 
@@ -533,6 +650,122 @@ fn uninstall_windows_task() -> Result<()> {
     Ok(())
 }
 
+/// schtasks.exe をサブコマンド付きで実行し、出力を表示する。
+/// schtasks の標準出力は OEM コードページなので、PowerShell 経由で
+/// `[Console]::OutputEncoding` を UTF-8 に固定してから受け取る。
+#[cfg(target_os = "windows")]
+fn run_schtasks(action: &str) -> Result<()> {
+    let task = task_name();
+    let command = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         schtasks.exe {action} /TN '{task}'"
+    );
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
+        .output()
+        .with_context(|| format!("schtasks {action} の実行に失敗しました"))?;
+
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        bail!(
+            "schtasks {action} がエラーで終了しました (exit code: {:?})",
+            output.status.code()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn start_windows_task() -> Result<()> {
+    ensure_installed()?;
+    run_schtasks("/Run")?;
+    println!("サービスを起動しました。");
+    Ok(())
+}
+
+/// 指定 TCP ポートを listen している HTTP サーバープロセスを停止する。
+///
+/// タスクスケジューラ側のタスクは `powershell.exe -Command "Start-Process ..."`
+/// で本体を切り離して起動しているため、`schtasks /End` で止められるのは
+/// 即時終了する PowerShell ラッパーだけで、`gyazo-mcp-server.exe` 本体は
+/// 残ってしまう。一方、プロセス名 (`Get-Process -Name gyazo-mcp-server`) で
+/// 止めると stdio モードや手動起動した別プロセスまで巻き込む。
+///
+/// HTTP サーバーは `tcp_port` を必ず bind するため、`Get-NetTCPConnection`
+/// から OwningProcess の PID を取得して、その PID だけを `Stop-Process` する
+/// ことで「サービスとして動いている本体」だけを正確に停止する。
+/// `stop_gyazo_mcp_server_by_port` で実行する PowerShell コマンド文字列を
+/// 構築する。テスト容易性のため `format!` を関数化している。
+#[cfg(target_os = "windows")]
+fn build_stop_by_port_command(tcp_port: u16) -> String {
+    format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         $owners = Get-NetTCPConnection -LocalPort {tcp_port} -State Listen \
+             -ErrorAction SilentlyContinue \
+             | Select-Object -ExpandProperty OwningProcess -Unique; \
+         if (-not $owners) {{ \
+             Write-Host 'ポート {tcp_port} を listen しているプロセスは見つかりませんでした。'; \
+             exit 0; \
+         }} \
+         foreach ($pid_ in $owners) {{ \
+             $proc = Get-Process -Id $pid_ -ErrorAction SilentlyContinue; \
+             if ($proc -and $proc.ProcessName -eq 'gyazo-mcp-server') {{ \
+                 Stop-Process -Id $pid_ -Force; \
+                 Write-Host (\"PID $pid_ (gyazo-mcp-server) を停止しました。\"); \
+             }} else {{ \
+                 $name = if ($proc) {{ $proc.ProcessName }} else {{ 'unknown' }}; \
+                 Write-Error (\"ポート {tcp_port} を listen しているのは gyazo-mcp-server ではありません (PID $pid_, name $name)。停止を中断します。\"); \
+                 exit 1; \
+             }} \
+         }}"
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn stop_gyazo_mcp_server_by_port(tcp_port: u16) -> Result<()> {
+    let command = build_stop_by_port_command(tcp_port);
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
+        .output()
+        .context("gyazo-mcp-server プロセスの停止に失敗しました")?;
+
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        bail!(
+            "gyazo-mcp-server プロセスの停止がエラーで終了しました (exit code: {:?})",
+            output.status.code()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn stop_windows_task(tcp_port: u16) -> Result<()> {
+    ensure_installed()?;
+    stop_gyazo_mcp_server_by_port(tcp_port)?;
+    println!("サービスを停止しました。");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn restart_windows_task(tcp_port: u16) -> Result<()> {
+    ensure_installed()?;
+    stop_gyazo_mcp_server_by_port(tcp_port)?;
+    run_schtasks("/Run")?;
+    println!("サービスを再起動しました。");
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 fn status_windows_task() -> Result<()> {
     // schtasks.exe の出力は OEM コードページ (日本語環境では CP932) なので、
@@ -626,6 +859,56 @@ mod tests {
 
         assert!(ps1.contains(task_name()));
         assert!(ps1.contains(r"C:\Users\test\.cargo\bin\gyazo-mcp-server.exe"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stop_by_port_command_uses_owning_process_and_validates_name() {
+        // 回帰テスト:
+        // - `schtasks /End` 方式 (本体ではなくラッパー PowerShell しか止まらない) に
+        //   戻していないこと
+        // - `Get-Process -Name gyazo-mcp-server` 方式 (stdio や手動起動の同名プロセス
+        //   まで巻き込む) に戻していないこと
+        // - `Get-NetTCPConnection -LocalPort <port> -State Listen` から OwningProcess
+        //   の PID を取り、`gyazo-mcp-server` であることを検証してから Stop-Process
+        //   する形式を維持していること
+        let command = build_stop_by_port_command(18449);
+
+        assert!(
+            command.contains("Get-NetTCPConnection -LocalPort 18449 -State Listen"),
+            "ポートで listen プロセスを特定する形式になっていません: {command}"
+        );
+        assert!(
+            command.contains("OwningProcess"),
+            "OwningProcess から PID を取得していません: {command}"
+        );
+        assert!(
+            command.contains("Stop-Process -Id"),
+            "PID を指定した Stop-Process になっていません: {command}"
+        );
+        assert!(
+            command.contains("ProcessName -eq 'gyazo-mcp-server'"),
+            "停止対象が gyazo-mcp-server かどうかを検証していません: {command}"
+        );
+        assert!(
+            !command.contains("schtasks /End"),
+            "schtasks /End 方式に回帰しています (タスク本体ではなくラッパーしか止まりません): {command}"
+        );
+        assert!(
+            !command.contains("Get-Process -Name gyazo-mcp-server"),
+            "Get-Process -Name 方式に回帰しています (同名プロセスを巻き込みます): {command}"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stop_by_port_command_embeds_dynamic_port() {
+        // tcp_port が format に流れ込んでいることを保証する。
+        let command = build_stop_by_port_command(19000);
+        assert!(
+            command.contains("LocalPort 19000"),
+            "渡した tcp_port が反映されていません: {command}"
+        );
     }
 
     #[cfg(target_os = "windows")]

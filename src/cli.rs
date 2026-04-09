@@ -132,6 +132,12 @@ pub(crate) enum ServiceCommand {
     Uninstall,
     /// サービスの状態を表示します
     Status,
+    /// サービスを起動します
+    Start,
+    /// サービスを停止します
+    Stop,
+    /// サービスを再起動します
+    Restart,
 }
 
 #[cfg(test)]
@@ -389,5 +395,21 @@ mod tests {
                 command: ServiceCommand::Status,
             }))
         );
+    }
+
+    #[test]
+    fn parses_service_start_stop_restart() {
+        for (arg, expected) in [
+            ("start", ServiceCommand::Start),
+            ("stop", ServiceCommand::Stop),
+            ("restart", ServiceCommand::Restart),
+        ] {
+            let cli = Cli::parse_from(["gyazo-mcp-server", "service", arg]);
+            assert_eq!(
+                cli.command,
+                Some(Command::Service(ServiceArgs { command: expected })),
+                "service {arg} のパースに失敗しました"
+            );
+        }
     }
 }
