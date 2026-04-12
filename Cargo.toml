@@ -1,6 +1,6 @@
 [package]
 name = "gyazo-mcp-server"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 description = "Local MCP server for Gyazo with HTTP and stdio transport support"
 readme = "README.md"
