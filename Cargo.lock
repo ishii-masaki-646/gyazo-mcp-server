@@ -776,6 +776,7 @@ dependencies = [
  "sha2",
  "tokio",
  "toml",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "unicode-width",
