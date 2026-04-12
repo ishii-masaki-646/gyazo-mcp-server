@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2 - 2026-04-12
+
+- Claude Code が Streamable HTTP MCP サーバーの `/.well-known/oauth-authorization-server` エンドポイントの存在だけで "needs authentication" と判定してしまう不具合 (anthropics/claude-code#46879) に対するワークアラウンドを追加しました。保存済みの OAuth トークン、ワンショット認証トークン (`stdio --auth`)、または個人アクセストークン (PAT) が Gyazo API に対して有効な間は、well-known メタデータエンドポイントが 404 を返し、MCP リクエストを Bearer token なしでも受け付けるようになります。トークンの有効性は Gyazo API (`users/me`) への疎通確認で検証し、結果を 5 分間キャッシュします。トークンが失効するとキャッシュ期限後に well-known が復活し、通常の OAuth フローが利用可能になります。
+- トークンの更新時 (`save_oauth_token` / `issue_access_token`) にキャッシュを即時無効化するようにしました。ログイン成功直後にワークアラウンドが反映されない問題を防ぎます。
+- Bearer token の fallback 判定を、Authorization ヘッダが未指定の場合に限定しました。無効な Bearer token を送った場合は保存済みトークンへの fallback を行わず 401 を返します。
+- dev-dependencies に `tower` (util feature) を追加しました。ミドルウェアの integration test に使用しています。
+
 ## 0.6.1 - 2026-04-09
 
 - `gyazo_get_image` で metadata が非公開もしくは存在しない画像 (`metadata_is_public: false` でアップロードされた画像、メタデータを含まない画像、`access_policy: anyone` の他人画像など) を取得しようとすると `Gyazo image detail のレスポンスを解析できませんでした` エラーで失敗する不具合を修正しました。Gyazo API はこの種のレスポンスから `metadata` フィールドを丸ごと省略してくることがあり、`GyazoImageDetail.metadata` が Non-Optional だったため serde が `missing field metadata` でパース失敗していました (本不具合は 0.6.0 で混入したものではなく、初期実装から存在していたバグです)。`GyazoImageDetail.metadata` および `GyazoImageSummary.metadata` を `Option<GyazoImageMetadata>` に変更し、`GyazoImageMetadata` の各フィールド (`app` / `title` / `url` / `desc`) もすべて `#[serde(default)]` 付きの `Option<String>` に揃えて、フィールド欠落 / 明示 null どちらでもパースできるようにしました。再発防止テストとして「metadata 丸ごと欠落」「metadata あり + 各フィールド部分欠落」「metadata あり + 各フィールド明示 null」の 3 ケースを追加しています。

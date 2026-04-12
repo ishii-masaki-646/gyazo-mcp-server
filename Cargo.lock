@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "gyazo-mcp-server"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -776,6 +776,7 @@ dependencies = [
  "sha2",
  "tokio",
  "toml",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "unicode-width",

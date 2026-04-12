@@ -103,26 +103,51 @@ pub(crate) async fn require_mcp_bearer_token(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
+    let has_authorization_header = request.headers().contains_key(AUTHORIZATION);
+
     match authorized_session_from_request(app_state.as_ref(), &request) {
         Ok(Some(session)) => {
             request.extensions_mut().insert(session);
             next.run(request).await
+        }
+        Ok(None) if !has_authorization_header => {
+            // Workaround: anthropics/claude-code#46879
+            // Authorization ヘッダ未指定の場合のみ、検証済みトークンで fallback する。
+            // 無効な Bearer token を送ってきた場合は fallback せず 401 を返す。
+            if let Some(session) = get_verified_session(app_state.as_ref()).await {
+                request.extensions_mut().insert(session);
+                next.run(request).await
+            } else {
+                unauthorized_response(app_state.as_ref(), Some("invalid_token"))
+            }
         }
         Ok(None) => unauthorized_response(app_state.as_ref(), Some("invalid_token")),
         Err(_) => unauthorized_response(app_state.as_ref(), Some("server_error")),
     }
 }
 
+// Workaround: anthropics/claude-code#46879
+// 検証済みトークンがある間は well-known メタデータを隠し、
+// Claude Code に OAuth フローを開始させない。
 pub(crate) async fn protected_resource_metadata_handler(
     State(app_state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    Json(build_protected_resource_metadata(app_state.as_ref()))
+) -> Response {
+    if get_verified_session(app_state.as_ref()).await.is_some() {
+        StatusCode::NOT_FOUND.into_response()
+    } else {
+        Json(build_protected_resource_metadata(app_state.as_ref())).into_response()
+    }
 }
 
+// Workaround: anthropics/claude-code#46879 (上記と同様)
 pub(crate) async fn authorization_server_metadata_handler(
     State(app_state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    Json(build_authorization_server_metadata(app_state.as_ref()))
+) -> Response {
+    if get_verified_session(app_state.as_ref()).await.is_some() {
+        StatusCode::NOT_FOUND.into_response()
+    } else {
+        Json(build_authorization_server_metadata(app_state.as_ref())).into_response()
+    }
 }
 
 pub(crate) async fn authorize_handler(
@@ -426,6 +451,73 @@ pub(crate) fn authorized_session_from_parts(
     app_state.authorized_session(token)
 }
 
+/// キャッシュ付きでトークンの有効性を Gyazo API に問い合わせ、
+/// 有効な `AuthorizedSession` があればそれを返す。
+///
+/// ## Workaround: Claude Code の OAuth メタデータ検出問題
+///
+/// Claude Code (anthropics/claude-code#46879) は Streamable HTTP MCP サーバーに
+/// 接続する際、`/.well-known/oauth-authorization-server` が存在するだけで
+/// "needs authentication" と判定する。MCP 仕様では 401 レスポンスを根拠に
+/// すべきだが、現状そうなっていない。
+///
+/// このワークアラウンドとして、保存済みトークンが Gyazo API に対して有効な間は
+/// well-known メタデータエンドポイントを 404 にし、MCP リクエストを Bearer
+/// token なしでも受け付けるようにしている。
+///
+/// 関連箇所:
+/// - [`protected_resource_metadata_handler`] — 有効時に 404 を返す
+/// - [`authorization_server_metadata_handler`] — 同上
+/// - [`require_mcp_bearer_token`] — Bearer token なしでも fallback する
+pub(crate) async fn get_verified_session(app_state: &AppState) -> Option<AuthorizedSession> {
+    // キャッシュが有効ならそれを返す
+    {
+        let cache = app_state
+            .verified_session_cache()
+            .read()
+            .expect("verified session cache lock is poisoned");
+        if let Some((checked_at, ref cached)) = *cache
+            && checked_at.elapsed() < app_state.verified_session_ttl()
+        {
+            return cached.clone();
+        }
+    }
+
+    // キャッシュが期限切れまたは未設定 → 候補トークンを順に疎通確認
+    let tokens = app_state.collect_backend_access_tokens().ok()?;
+    let tokens_was_empty = tokens.is_empty();
+    let mut session = None;
+    for token in tokens {
+        match fetch_authenticated_user(&token).await {
+            Ok(gyazo_user) => {
+                tracing::debug!("トークン疎通確認成功");
+                session = Some(AuthorizedSession {
+                    record: AccessTokenRecord {
+                        backend_access_token: token,
+                        gyazo_user,
+                    },
+                });
+                break;
+            }
+            Err(e) => {
+                tracing::debug!("トークン疎通確認スキップ: {e}");
+            }
+        }
+    }
+    if session.is_none() && !tokens_was_empty {
+        tracing::warn!("有効なトークンが見つかりませんでした");
+    }
+
+    // キャッシュを更新
+    let mut cache = app_state
+        .verified_session_cache()
+        .write()
+        .expect("verified session cache lock is poisoned");
+    *cache = Some((std::time::Instant::now(), session.clone()));
+
+    session
+}
+
 fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
     value
@@ -558,7 +650,10 @@ enum AuthorizationStart {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_client_redirect_url, verify_pkce};
+    use axum::http::HeaderMap;
+    use axum::http::header::AUTHORIZATION;
+
+    use super::{build_client_redirect_url, extract_bearer_token, verify_pkce};
 
     #[test]
     fn appends_code_and_state_to_redirect_uri() {
@@ -581,5 +676,187 @@ mod tests {
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
         )
         .unwrap();
+    }
+
+    // --- Workaround 回帰テスト (anthropics/claude-code#46879) ---
+
+    #[test]
+    fn extract_bearer_token_returns_none_when_no_authorization_header() {
+        let headers = HeaderMap::new();
+        assert!(extract_bearer_token(&headers).is_none());
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_token_for_valid_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer my-token".parse().unwrap());
+        assert_eq!(extract_bearer_token(&headers), Some("my-token"));
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_for_empty_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer ".parse().unwrap());
+        assert!(extract_bearer_token(&headers).is_none());
+    }
+
+    /// 回帰テスト: Authorization ヘッダが存在するが Bearer token が無効な場合、
+    /// ミドルウェアは fallback せずに 401 を返すべき。
+    /// ミドルウェア全体のテストは AppState が必要で重いため、
+    /// ここでは判定に使うヘッダ有無のロジックを検証する。
+    #[test]
+    fn has_authorization_header_distinguishes_present_vs_absent() {
+        let empty = HeaderMap::new();
+        assert!(
+            !empty.contains_key(AUTHORIZATION),
+            "Authorization なし → fallback 許可"
+        );
+
+        let mut with_invalid = HeaderMap::new();
+        with_invalid.insert(AUTHORIZATION, "Bearer invalid-xyz".parse().unwrap());
+        assert!(
+            with_invalid.contains_key(AUTHORIZATION),
+            "無効な Bearer あり → fallback 禁止"
+        );
+    }
+
+    // --- ミドルウェア integration test (anthropics/claude-code#46879) ---
+
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware;
+    use axum::routing::get;
+    use tower::util::ServiceExt;
+
+    use crate::app_state::AppState;
+    use crate::runtime_config::RuntimeConfig;
+
+    fn test_app_state() -> Arc<AppState> {
+        Arc::new(AppState::new_for_test(RuntimeConfig::for_test()))
+    }
+
+    fn test_router(app_state: Arc<AppState>) -> Router {
+        async fn ok_handler() -> &'static str {
+            "ok"
+        }
+
+        Router::new()
+            .route("/test", get(ok_handler))
+            .route_layer(middleware::from_fn_with_state(
+                app_state.clone(),
+                super::require_mcp_bearer_token,
+            ))
+            .with_state(app_state)
+    }
+
+    #[tokio::test]
+    async fn middleware_rejects_request_without_bearer_when_no_saved_token() {
+        let app = test_router(test_app_state());
+
+        let response = app
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn middleware_rejects_invalid_bearer_even_with_no_saved_token() {
+        let app = test_router(test_app_state());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("Authorization", "Bearer invalid-token-xyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 回帰テスト: 無効な Bearer token を送った場合、保存済みトークンが
+    /// あっても fallback せずに 401 を返すこと。
+    #[tokio::test]
+    async fn middleware_does_not_fallback_for_invalid_bearer() {
+        let app_state = test_app_state();
+
+        // 検証済みセッションをキャッシュに注入（Gyazo API を呼ばずにテスト）
+        {
+            let mut cache = app_state.verified_session_cache().write().unwrap();
+            *cache = Some((
+                std::time::Instant::now(),
+                Some(crate::app_state::AuthorizedSession {
+                    record: crate::app_state::AccessTokenRecord {
+                        backend_access_token: "fake-backend-token".to_string(),
+                        gyazo_user: crate::gyazo_api::GyazoUserProfile {
+                            email: String::new(),
+                            name: String::new(),
+                            profile_image: String::new(),
+                            uid: String::new(),
+                        },
+                    },
+                }),
+            ));
+        }
+
+        let app = test_router(app_state);
+
+        // 無効な Bearer を送る → fallback しない → 401
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("Authorization", "Bearer invalid-token-xyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 回帰テスト: Authorization ヘッダなしで、検証済みセッションが
+    /// キャッシュにあれば fallback して 200 を返すこと。
+    #[tokio::test]
+    async fn middleware_falls_back_to_verified_session_without_authorization_header() {
+        let app_state = test_app_state();
+
+        // 検証済みセッションをキャッシュに注入
+        {
+            let mut cache = app_state.verified_session_cache().write().unwrap();
+            *cache = Some((
+                std::time::Instant::now(),
+                Some(crate::app_state::AuthorizedSession {
+                    record: crate::app_state::AccessTokenRecord {
+                        backend_access_token: "fake-backend-token".to_string(),
+                        gyazo_user: crate::gyazo_api::GyazoUserProfile {
+                            email: String::new(),
+                            name: String::new(),
+                            profile_image: String::new(),
+                            uid: String::new(),
+                        },
+                    },
+                }),
+            ));
+        }
+
+        let app = test_router(app_state);
+
+        // Authorization ヘッダなし → fallback → 200
+        let response = app
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

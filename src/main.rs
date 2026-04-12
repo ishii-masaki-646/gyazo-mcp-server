@@ -289,6 +289,14 @@ fn service_runtime_port_hint() -> Result<u16> {
 }
 
 async fn run_http_server(app_state: Arc<AppState>, runtime_config: RuntimeConfig) -> Result<()> {
+    // 起動時にキャッシュを温めておく
+    let has_verified = mcp_oauth::get_verified_session(app_state.as_ref())
+        .await
+        .is_some();
+    if has_verified {
+        tracing::info!("保存済みトークンで Gyazo API と疎通確認できました");
+    }
+
     let service_app_state = app_state.clone();
     let service: StreamableHttpService<GyazoServer, LocalSessionManager> =
         StreamableHttpService::new(

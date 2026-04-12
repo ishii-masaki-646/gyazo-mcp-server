@@ -196,6 +196,17 @@ impl RuntimeConfig {
     pub(crate) fn oauth_callback_url(&self) -> String {
         format!("{}{}", self.base_url(), self.oauth_callback_path())
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            tcp_port: 0,
+            bind_ip: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            base_url: None,
+            oauth_callback_path: "/oauth/callback".to_string(),
+            rust_log: None,
+        }
+    }
 }
 
 /// コンテナ環境かどうかを検出する。

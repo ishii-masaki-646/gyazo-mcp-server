@@ -1,6 +1,6 @@
 [package]
 name = "gyazo-mcp-server"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 description = "Local MCP server for Gyazo with HTTP and stdio transport support"
 readme = "README.md"
@@ -32,3 +32,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-width = "0.2.2"
 uuid = { version = "1.23", features = ["v4"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

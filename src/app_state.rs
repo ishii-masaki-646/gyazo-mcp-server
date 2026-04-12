@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex, sync::RwLock, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
@@ -19,6 +19,9 @@ use crate::{
     runtime_config::RuntimeConfig,
 };
 
+/// トークン疎通確認のキャッシュ TTL
+const VERIFIED_SESSION_TTL: Duration = Duration::from_secs(300);
+
 pub(crate) struct AppState {
     auth_config: AuthConfig,
     auth_state: Mutex<AuthState>,
@@ -26,6 +29,7 @@ pub(crate) struct AppState {
     mcp_session_file_path: Option<PathBuf>,
     mcp_signing_key: Vec<u8>,
     runtime_config: RuntimeConfig,
+    verified_session_cache: RwLock<Option<(std::time::Instant, Option<AuthorizedSession>)>>,
 }
 
 #[derive(Debug, Default)]
@@ -93,6 +97,7 @@ impl AppState {
             mcp_session_file_path,
             mcp_signing_key: signing_key,
             runtime_config,
+            verified_session_cache: RwLock::new(None),
         })
     }
 
@@ -125,6 +130,8 @@ impl AppState {
         save_token(&path, &token)?;
         guard.stored_token = Some(token);
 
+        self.invalidate_verified_session_cache();
+
         Ok(())
     }
 
@@ -151,6 +158,56 @@ impl AppState {
         }
 
         Ok(self.auth_config.personal_access_token())
+    }
+
+    /// 検証候補となる `backend_access_token` を重複排除して返す。
+    /// MCP OAuth セッション → ワンショット認証トークン → PAT の優先順位で収集し、
+    /// 呼び出し側が順に Gyazo API で疎通確認できるようにする。
+    pub(crate) fn collect_backend_access_tokens(&self) -> Result<Vec<String>> {
+        let mut tokens = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // MCP OAuth セッションに保存されたトークン（複数セッションがありうる）
+        {
+            let guard = self
+                .oauth_session
+                .lock()
+                .map_err(|_| anyhow!("oauth session lock is poisoned"))?;
+            for record in guard.access_tokens.values() {
+                if seen.insert(record.backend_access_token.clone()) {
+                    tokens.push(record.backend_access_token.clone());
+                }
+            }
+        }
+
+        // ワンショット認証 or PAT
+        if let Some(token) = self.resolve_backend_access_token()?
+            && seen.insert(token.clone())
+        {
+            tokens.push(token);
+        }
+
+        Ok(tokens)
+    }
+
+    pub(crate) fn verified_session_cache(
+        &self,
+    ) -> &RwLock<Option<(std::time::Instant, Option<AuthorizedSession>)>> {
+        &self.verified_session_cache
+    }
+
+    pub(crate) fn verified_session_ttl(&self) -> Duration {
+        VERIFIED_SESSION_TTL
+    }
+
+    /// 認証情報が更新されたときにキャッシュを無効化する。
+    /// 次回の `get_verified_session()` で再検証が走る。
+    fn invalidate_verified_session_cache(&self) {
+        let mut cache = self
+            .verified_session_cache
+            .write()
+            .expect("verified session cache lock is poisoned");
+        *cache = None;
     }
 
     pub(crate) fn set_pending_direct_login_state(&self, state: String) -> Result<()> {
@@ -254,6 +311,8 @@ impl AppState {
         guard.access_tokens.insert(session_id.clone(), record);
         self.persist_mcp_sessions(&guard)?;
 
+        self.invalidate_verified_session_cache();
+
         sign_access_token(&self.mcp_signing_key, &session_id)
     }
 
@@ -328,4 +387,26 @@ fn load_or_initialize_mcp_sessions(path: Option<&std::path::Path>) -> Result<Loa
         access_tokens: HashMap::new(),
         registered_clients: HashMap::new(),
     })
+}
+
+#[cfg(test)]
+impl AppState {
+    /// テスト用の最小構成 AppState を作成する。
+    /// ファイルシステム・環境変数に依存しない。
+    pub(crate) fn new_for_test(runtime_config: RuntimeConfig) -> Self {
+        use crate::auth::mcp_session_store::generate_signing_key;
+
+        Self {
+            auth_config: AuthConfig::from_env(),
+            auth_state: Mutex::new(AuthState {
+                token_file_path: None,
+                stored_token: None,
+            }),
+            oauth_session: Mutex::new(OAuthSessionState::default()),
+            mcp_session_file_path: None,
+            mcp_signing_key: generate_signing_key(),
+            runtime_config,
+            verified_session_cache: RwLock::new(None),
+        }
+    }
 }
