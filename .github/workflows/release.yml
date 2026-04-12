@@ -140,7 +140,7 @@ jobs:
 
   docker:
     name: Docker Image
-    needs: release
+    needs: [release, crates-io, homebrew, winget]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
