@@ -119,7 +119,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body: ${{ steps.notes.outputs.body }}
           files: artifacts/*
