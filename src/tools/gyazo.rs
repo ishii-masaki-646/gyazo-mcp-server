@@ -67,7 +67,9 @@ impl GyazoServer {
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let user = fetch_authenticated_user(&session.record.backend_access_token)
             .await
             .map_err(internal_error)?;
@@ -88,7 +90,9 @@ impl GyazoServer {
         request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(GyazoSearchArgs { query, page, per }): Parameters<GyazoSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let images = search_images(&session.record.backend_access_token, &query, page, per)
             .await
             .map_err(internal_error)?;
@@ -104,7 +108,9 @@ impl GyazoServer {
         request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(GyazoListImagesArgs { page, per_page }): Parameters<GyazoListImagesArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let images = list_images(&session.record.backend_access_token, page, per_page)
             .await
             .map_err(internal_error)?;
@@ -120,7 +126,9 @@ impl GyazoServer {
         request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoGetImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let image_ref = select_image_ref(args)?;
         let image = get_image(&session.record.backend_access_token, &image_ref)
             .await
@@ -135,7 +143,9 @@ impl GyazoServer {
         request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoGetImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let image_ref = select_image_ref(args)?;
         let deleted = delete_image(&session.record.backend_access_token, &image_ref)
             .await
@@ -151,7 +161,9 @@ impl GyazoServer {
         &self,
         request_context: RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let image = get_latest_image(&session.record.backend_access_token)
             .await
             .map_err(internal_error)?;
@@ -171,7 +183,9 @@ impl GyazoServer {
         request_context: RequestContext<rmcp::service::RoleServer>,
         Parameters(args): Parameters<GyazoUploadImageArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let session = self.authorized_session_for_request(&request_context)?;
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
         let uploaded = upload_image(
             &session.record.backend_access_token,
             GyazoUploadImageRequest {
