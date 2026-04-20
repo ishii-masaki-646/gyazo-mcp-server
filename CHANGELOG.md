@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 - 2026-04-14
+
+- 0.6.2 で導入した Claude Code 向けワークアラウンド (anthropics/claude-code#46879) が tool 呼び出し時に `MCP error -32602: request context に authorized session が含まれていません` エラーで失敗する不具合を修正しました。ワークアラウンド用の `require_mcp_bearer_token` ミドルウェアは検証済みの `AuthorizedSession` を `request.extensions_mut()` に挿入していましたが、`rmcp` の `StreamableHttpService` は HTTP リクエストの `Parts` のみを tool handler の `RequestContext::extensions` に転送し、任意の拡張は転送しません。そのため Authorization ヘッダ無しで届いた呼び出しでは tool handler 側でセッションを取り戻せずエラーになっていました。`authorized_session_from_context` を async 化し、`Parts` 経由でも取れず fallback session も無い場合に `get_verified_session` を最終フォールバックとして呼ぶように変更しました。キャッシュにヒットする限り Gyazo API への追加問い合わせは発生しません。
+
 ## 0.6.2 - 2026-04-12
 
 - Claude Code が Streamable HTTP MCP サーバーの `/.well-known/oauth-authorization-server` エンドポイントの存在だけで "needs authentication" と判定してしまう不具合 (anthropics/claude-code#46879) に対するワークアラウンドを追加しました。保存済みの OAuth トークン、ワンショット認証トークン (`stdio --auth`)、または個人アクセストークン (PAT) が Gyazo API に対して有効な間は、well-known メタデータエンドポイントが 404 を返し、MCP リクエストを Bearer token なしでも受け付けるようになります。トークンの有効性は Gyazo API (`users/me`) への疎通確認で検証し、結果を 5 分間キャッシュします。トークンが失効するとキャッシュ期限後に well-known が復活し、通常の OAuth フローが利用可能になります。
