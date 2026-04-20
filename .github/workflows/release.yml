@@ -273,6 +273,20 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      # fork (ishii-masaki-646/winget-pkgs) が upstream (microsoft/winget-pkgs)
+      # から大きく遅れていると、winget-releaser 内の `CreateRef` が GitHub API
+      # に拒否され、表面上は「permissions to execute CreateRef がない」という
+      # 誤解を招くメッセージで失敗する。リリース直前に公式の fork sync API
+      # (POST /repos/{owner}/{repo}/merge-upstream) を叩いておけば、手動で
+      # 「Sync fork」ボタンを押したのと同じ状態を確保できる。
+      # https://docs.github.com/en/rest/branches/branches#sync-a-fork-branch-with-the-upstream-repository
+      - name: Sync fork with upstream
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_PAT }}
+        run: |
+          gh api -X POST repos/ishii-masaki-646/winget-pkgs/merge-upstream \
+            -f branch=master
+
       - name: Submit package update to winget-pkgs
         uses: vedantmgoyal9/winget-releaser@v2
         with:
