@@ -11,8 +11,9 @@ use serde_json::json;
 
 use crate::{
     gyazo_api::{
-        GyazoUploadImageRequest, delete_image, fetch_authenticated_user, fetch_image_as_base64,
-        get_image, get_latest_image, get_oembed, list_images, search_images, upload_image,
+        GyazoUploadImageFromFileRequest, GyazoUploadImageRequest, delete_image,
+        fetch_authenticated_user, fetch_image_as_base64, get_image, get_latest_image, get_oembed,
+        list_images, search_images, upload_image, upload_image_from_file,
     },
     server::GyazoServer,
 };
@@ -44,6 +45,21 @@ struct GyazoOEmbedArgs {
     /// メタデータを返さないため、呼び出し側で意味のある alt を指定したい
     /// 場合に使う。
     alt: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct GyazoUploadImageFromFileArgs {
+    /// アップロードするローカル画像ファイルへの絶対パス
+    file_path: String,
+    access_policy: Option<String>,
+    metadata_is_public: Option<bool>,
+    referer_url: Option<String>,
+    app: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    created_at: Option<f64>,
+    collection_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -190,6 +206,37 @@ impl GyazoServer {
             &session.record.backend_access_token,
             GyazoUploadImageRequest {
                 image_data: args.image_data,
+                access_policy: args.access_policy,
+                metadata_is_public: args.metadata_is_public,
+                referer_url: args.referer_url,
+                app: args.app,
+                title: args.title,
+                description: args.description,
+                created_at: args.created_at,
+                collection_id: args.collection_id,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+        json_result(uploaded)
+    }
+
+    #[rmcp::tool(
+        description = "ローカルファイルパスを指定して Gyazo に画像をアップロードします。base64 をチャット越しに手で組み立てる gyazo_upload_image と違い、ディスク上のファイルをそのまま読んでアップロードするため、大きな画像や転記ミスの心配がありません。file_path はこのプロセスから読める絶対パスを指定してください。"
+    )]
+    async fn gyazo_upload_image_from_file(
+        &self,
+        request_context: RequestContext<rmcp::service::RoleServer>,
+        Parameters(args): Parameters<GyazoUploadImageFromFileArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = self
+            .authorized_session_for_request(&request_context)
+            .await?;
+        let uploaded = upload_image_from_file(
+            &session.record.backend_access_token,
+            GyazoUploadImageFromFileRequest {
+                file_path: args.file_path,
                 access_policy: args.access_policy,
                 metadata_is_public: args.metadata_is_public,
                 referer_url: args.referer_url,

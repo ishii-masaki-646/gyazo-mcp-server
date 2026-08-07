@@ -132,6 +132,19 @@ pub(crate) struct GyazoUploadImageRequest {
     pub(crate) collection_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct GyazoUploadImageFromFileRequest {
+    pub(crate) file_path: String,
+    pub(crate) access_policy: Option<String>,
+    pub(crate) metadata_is_public: Option<bool>,
+    pub(crate) referer_url: Option<String>,
+    pub(crate) app: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) created_at: Option<f64>,
+    pub(crate) collection_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GyazoOEmbedResponse {
     pub(crate) version: String,
@@ -285,12 +298,59 @@ pub(crate) async fn search_images(
     Ok(images)
 }
 
+/// upload_image / upload_image_from_file で共通の、画像本体以外の
+/// オプショナルなアップロードメタデータ。
+struct UploadImageMetadata {
+    access_policy: Option<String>,
+    metadata_is_public: Option<bool>,
+    referer_url: Option<String>,
+    app: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    created_at: Option<f64>,
+    collection_id: Option<String>,
+}
+
+fn apply_upload_metadata_fields(
+    mut form: multipart::Form,
+    metadata: UploadImageMetadata,
+) -> multipart::Form {
+    if let Some(access_policy) = metadata.access_policy {
+        form = form.text("access_policy", access_policy);
+    }
+    if let Some(metadata_is_public) = metadata.metadata_is_public {
+        form = form.text(
+            "metadata_is_public",
+            if metadata_is_public { "true" } else { "false" }.to_string(),
+        );
+    }
+    if let Some(referer_url) = metadata.referer_url {
+        form = form.text("referer_url", referer_url);
+    }
+    if let Some(app) = metadata.app {
+        form = form.text("app", app);
+    }
+    if let Some(title) = metadata.title {
+        form = form.text("title", title);
+    }
+    if let Some(description) = metadata.description {
+        form = form.text("desc", description);
+    }
+    if let Some(created_at) = metadata.created_at {
+        form = form.text("created_at", created_at.to_string());
+    }
+    if let Some(collection_id) = metadata.collection_id {
+        form = form.text("collection_id", collection_id);
+    }
+    form
+}
+
 pub(crate) async fn upload_image(
     access_token: &str,
     request: GyazoUploadImageRequest,
 ) -> Result<GyazoUploadImageResult> {
     let image_bytes = decode_image_data(&request.image_data)?;
-    let mut form = multipart::Form::new()
+    let form = multipart::Form::new()
         .text("access_token", access_token.to_string())
         .part(
             "imagedata",
@@ -299,34 +359,73 @@ pub(crate) async fn upload_image(
                 .mime_str("image/png")
                 .context("アップロード画像の MIME type を設定できませんでした")?,
         );
+    let form = apply_upload_metadata_fields(
+        form,
+        UploadImageMetadata {
+            access_policy: request.access_policy,
+            metadata_is_public: request.metadata_is_public,
+            referer_url: request.referer_url,
+            app: request.app,
+            title: request.title,
+            description: request.description,
+            created_at: request.created_at,
+            collection_id: request.collection_id,
+        },
+    );
 
-    if let Some(access_policy) = request.access_policy {
-        form = form.text("access_policy", access_policy);
-    }
-    if let Some(metadata_is_public) = request.metadata_is_public {
-        form = form.text(
-            "metadata_is_public",
-            if metadata_is_public { "true" } else { "false" }.to_string(),
+    let response = reqwest::Client::new()
+        .post(UPLOAD_IMAGE_URL)
+        .multipart(form)
+        .send()
+        .await
+        .context("Gyazo upload endpoint の呼び出しに失敗しました")?;
+
+    parse_json_response::<GyazoUploadImageResult>(response, "Gyazo upload").await
+}
+
+/// file_path からアップロード用の (ファイル名, MIME type) を決める。
+/// ファイル名が取れない場合（末尾が `..` 等）は "upload" にフォールバックする。
+fn resolve_upload_file_name_and_mime(file_path: &str) -> (String, String) {
+    let file_name = std::path::Path::new(file_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("upload")
+        .to_string();
+    let mime_type = guess_mime_type_from_url(file_path);
+    (file_name, mime_type)
+}
+
+pub(crate) async fn upload_image_from_file(
+    access_token: &str,
+    request: GyazoUploadImageFromFileRequest,
+) -> Result<GyazoUploadImageResult> {
+    let image_bytes = tokio::fs::read(&request.file_path)
+        .await
+        .with_context(|| format!("ファイル {} を読み込めませんでした", request.file_path))?;
+    let (file_name, mime_type) = resolve_upload_file_name_and_mime(&request.file_path);
+
+    let form = multipart::Form::new()
+        .text("access_token", access_token.to_string())
+        .part(
+            "imagedata",
+            multipart::Part::bytes(image_bytes)
+                .file_name(file_name)
+                .mime_str(&mime_type)
+                .context("アップロード画像の MIME type を設定できませんでした")?,
         );
-    }
-    if let Some(referer_url) = request.referer_url {
-        form = form.text("referer_url", referer_url);
-    }
-    if let Some(app) = request.app {
-        form = form.text("app", app);
-    }
-    if let Some(title) = request.title {
-        form = form.text("title", title);
-    }
-    if let Some(description) = request.description {
-        form = form.text("desc", description);
-    }
-    if let Some(created_at) = request.created_at {
-        form = form.text("created_at", created_at.to_string());
-    }
-    if let Some(collection_id) = request.collection_id {
-        form = form.text("collection_id", collection_id);
-    }
+    let form = apply_upload_metadata_fields(
+        form,
+        UploadImageMetadata {
+            access_policy: request.access_policy,
+            metadata_is_public: request.metadata_is_public,
+            referer_url: request.referer_url,
+            app: request.app,
+            title: request.title,
+            description: request.description,
+            created_at: request.created_at,
+            collection_id: request.collection_id,
+        },
+    );
 
     let response = reqwest::Client::new()
         .post(UPLOAD_IMAGE_URL)
@@ -535,8 +634,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        GyazoImageDetail, GyazoImageSummary, create_image_resource_uri, decode_image_data,
-        extract_image_id_from_resource_uri, guess_mime_type_from_url, normalize_image_id,
+        GyazoImageDetail, GyazoImageSummary, GyazoUploadImageFromFileRequest,
+        create_image_resource_uri, decode_image_data, extract_image_id_from_resource_uri,
+        guess_mime_type_from_url, normalize_image_id, resolve_upload_file_name_and_mime,
+        upload_image_from_file,
     };
 
     #[test]
@@ -569,6 +670,45 @@ mod tests {
     fn decode_image_data_accepts_data_url_prefix() {
         let actual = decode_image_data("data:image/png;base64,SGVsbG8=").unwrap();
         assert_eq!(actual, b"Hello");
+    }
+
+    #[test]
+    fn resolve_upload_file_name_and_mime_uses_basename_and_extension() {
+        let (file_name, mime_type) =
+            resolve_upload_file_name_and_mime("/tmp/screenshots/button.JPG");
+        assert_eq!(file_name, "button.JPG");
+        assert_eq!(mime_type, "image/jpeg");
+    }
+
+    #[test]
+    fn resolve_upload_file_name_and_mime_falls_back_when_no_file_name() {
+        let (file_name, mime_type) = resolve_upload_file_name_and_mime("/");
+        assert_eq!(file_name, "upload");
+        assert_eq!(mime_type, "application/octet-stream");
+    }
+
+    /// ファイルが存在しない場合、ネットワークへ到達する前に読み込みエラーで
+    /// 早期リターンすることを保証する（access_token に有効な値が無くても
+    /// テストが通ることがこの早期リターンの裏付けになる）。
+    #[tokio::test]
+    async fn upload_image_from_file_reports_missing_file() {
+        let result = upload_image_from_file(
+            "dummy-token",
+            GyazoUploadImageFromFileRequest {
+                file_path: "/nonexistent/path/should-not-exist.png".to_string(),
+                access_policy: None,
+                metadata_is_public: None,
+                referer_url: None,
+                app: None,
+                title: None,
+                description: None,
+                created_at: None,
+                collection_id: None,
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
     }
 
     #[test]
