@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 - 2026-08-07
+
+- `gyazo_upload_image_from_file` tool を追加しました。ローカルファイルパスを指定して Gyazo に画像をアップロードできます。既存の `gyazo_upload_image` は呼び出し側で画像を base64 文字列に変換してチャット経由で渡す必要があり、大きな画像では転記時の欠落・破損が起きやすい問題がありました。新しい tool はディスク上のファイルを直接読み込むため、この問題を回避できます。
+- `upload_image` と `upload_image_from_file` で共通の、画像本体以外のアップロードメタデータ（access_policy / title / description 等）を multipart フォームへ積む処理を `apply_upload_metadata_fields` として共通化しました。
+
 ## 0.6.3 - 2026-04-14
 
 - 0.6.2 で導入した Claude Code 向けワークアラウンド (anthropics/claude-code#46879) が tool 呼び出し時に `MCP error -32602: request context に authorized session が含まれていません` エラーで失敗する不具合を修正しました。ワークアラウンド用の `require_mcp_bearer_token` ミドルウェアは検証済みの `AuthorizedSession` を `request.extensions_mut()` に挿入していましたが、`rmcp` の `StreamableHttpService` は HTTP リクエストの `Parts` のみを tool handler の `RequestContext::extensions` に転送し、任意の拡張は転送しません。そのため Authorization ヘッダ無しで届いた呼び出しでは tool handler 側でセッションを取り戻せずエラーになっていました。`authorized_session_from_context` を async 化し、`Parts` 経由でも取れず fallback session も無い場合に `get_verified_session` を最終フォールバックとして呼ぶように変更しました。キャッシュにヒットする限り Gyazo API への追加問い合わせは発生しません。
