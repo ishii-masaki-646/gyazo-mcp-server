@@ -302,19 +302,14 @@ jobs:
     # 外部サービスが `release/latest` を参照して最新版を
     # デプロイできるようにするためのブランチ。
     #
-    # 非 fast-forward になる場合 (backport リリース / `release/latest` が
-    # 手動で前進していた等、現行の `release/latest` が新タグの祖先になって
-    # いないケース) は、`--force` なしの push が拒否されて step が fail する。
-    # ただしリリース本体 (artifacts / crates.io / Homebrew / winget / Docker)
-    # は既に成功しているので、このジョブの失敗でワークフロー全体を赤くする
-    # 意義は薄い。`continue-on-error: true` で best-effort 扱いとし、失敗時は
-    # ジョブだけ赤く残して手動対応の気付きにする。
+    # `release/latest` は常に最新タグの commit を指す想定のブランチなので、
+    # 非 fast-forward (backport リリース / `release/latest` が手動で前進して
+    # いた等) になっても `--force` で常に最新タグへ揃える。
     needs: [release, crates-io, homebrew, winget, docker]
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 
       - name: Fast-forward release/latest to this tag commit
         run: |
-          git push origin "${GITHUB_SHA}:refs/heads/release/latest"
+          git push --force origin "${GITHUB_SHA}:refs/heads/release/latest"
