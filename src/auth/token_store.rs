@@ -15,8 +15,12 @@ pub(crate) fn load_token(path: &Path) -> Result<Option<StoredToken>> {
 
     let raw = fs::read_to_string(path)
         .with_context(|| format!("token file を読み取れませんでした: {}", path.display()))?;
-    let token = toml::from_str(&raw)
+    let token: StoredToken = toml::from_str(&raw)
         .with_context(|| format!("token file を解析できませんでした: {}", path.display()))?;
+
+    if token.access_token.trim().is_empty() {
+        return Ok(None);
+    }
 
     Ok(Some(token))
 }
@@ -62,6 +66,25 @@ mod tests {
         let loaded = load_token(&path).unwrap();
 
         assert_eq!(loaded, Some(token));
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn treats_empty_access_token_as_absent() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gyazo-mcp-server-test-empty-{unique}"));
+        let path = dir.join("token.toml");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, "access_token=\"\"\n").unwrap();
+
+        let loaded = load_token(&path).unwrap();
+
+        assert_eq!(loaded, None);
 
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);

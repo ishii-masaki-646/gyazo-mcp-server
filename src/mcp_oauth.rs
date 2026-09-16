@@ -168,8 +168,28 @@ pub(crate) async fn token_handler(
 ) -> impl IntoResponse {
     match exchange_authorization_code(app_state.as_ref(), form).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        Err(error) => oauth_error_response(StatusCode::BAD_REQUEST, "invalid_grant", &error),
     }
+}
+
+/// RFC 6749 §5.2 が要求する JSON 形式のエラーレスポンスを組み立てる。
+/// クライアント側の OAuth エラーパーサーはこの形式を前提にしているため、
+/// プレーンテキストで返すとパース失敗という二次エラーを引き起こす。
+fn oauth_error_response(status: StatusCode, error: &str, cause: &anyhow::Error) -> Response {
+    (
+        status,
+        Json(OAuthErrorBody {
+            error: error.to_string(),
+            error_description: cause.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+#[derive(Debug, Serialize)]
+struct OAuthErrorBody {
+    error: String,
+    error_description: String,
 }
 
 pub(crate) async fn register_client_handler(
